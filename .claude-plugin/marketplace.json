@@ -1,0 +1,12 @@
+{
+  "name": "cc-subcodex",
+  "owner": {
+    "name": "Antiman-cmyk"
+  },
+  "plugins": [
+    {
+      "name": "subcodex",
+      "source": "./"
+    }
+  ]
+}

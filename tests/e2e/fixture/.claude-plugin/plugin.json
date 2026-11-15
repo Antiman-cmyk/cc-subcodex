@@ -1,0 +1,5 @@
+{
+  "name": "subcodex-fixture",
+  "version": "0.0.1",
+  "description": "Test fixture of the subcodex end-to-end tests: one harmless tool that a Codex agent can be asked to use through the mod's bridge. Loaded only by tests/e2e."
+}
