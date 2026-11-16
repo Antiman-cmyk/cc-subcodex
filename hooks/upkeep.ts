@@ -1,6 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { agents } from './agents'
+import { ALIVE } from './app-server'
 import { findCodex, loginOf } from './codex-home'
 import { DATA_DIR, OWN_CODEX_HOME, PLUGIN, USAGE_MARK } from './config'
 import { limitKey, limitText } from './usage'
@@ -16,13 +17,18 @@ export const COMMAND = PLUGIN
 // Script arguments: $0 the mod's folder, $1 the person's Codex home, $2 the
 // link mark; `PRUNE` also $3, an age in days.
 
-/** Counts what is kept, one `name=value` per line. */
-const LOOK = `home="$0/codex-home"
+/** Counts what is kept, one `name=value` per line; `servers` counts those running. */
+const LOOK = `${ALIVE}
+home="$0/codex-home"
 echo "sessions=$(find "$home/sessions" "$home/archived_sessions" -type f -name 'rollout-*.jsonl*' 2>/dev/null | wc -l | tr -d ' ')"
 echo "oldest=$(find "$home/sessions" "$home/archived_sessions" -type f -name 'rollout-*.jsonl*' 2>/dev/null | sed 's|.*/rollout-||' | sort | head -1 | cut -c1-10)"
 echo "size=$(du -sh "$0" 2>/dev/null | cut -f1 | tr -d ' ')"
 echo "links=$(find "$1/sessions" "$1/archived_sessions" -type l -name "rollout-*$2.jsonl*" 2>/dev/null | wc -l | tr -d ' ')"
-echo "servers=$(find "$0/run" -name '*.fifo' 2>/dev/null | wc -l | tr -d ' ')"`
+servers=0
+for pipe in "$0"/run/*.fifo; do
+  [ -p "$pipe" ] && alive "\${pipe%.fifo}" && servers=$((servers + 1))
+done
+echo "servers=$servers"`
 
 // Removes the links given one per line, and the date folders this leaves empty.
 const UNLINK = `unlink_each() {
