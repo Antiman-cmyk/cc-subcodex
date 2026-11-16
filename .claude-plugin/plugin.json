@@ -1,6 +1,6 @@
 {
   "name": "subcodex",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Runs OpenAI Codex as a native Claude Code subagent type (subcodex:codex): the main agent dispatches it like any subagent, its work shows in the agent's transcript, and its closing message comes back as the result.",
   "license": "MIT",
   "repository": "https://github.com/Antiman-cmyk/cc-subcodex",

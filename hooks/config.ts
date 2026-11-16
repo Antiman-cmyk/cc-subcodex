@@ -2,7 +2,7 @@
 
 export const PLUGIN = 'subcodex'
 /** The mod's version, as in plugin.json; sent to app-server as the client version. */
-export const VERSION = '1.0.0'
+export const VERSION = '1.0.1'
 /** The agent type's short name: the type is `subcodex:codex`. */
 export const NAME = 'codex'
 export const TYPE = `${PLUGIN}:${NAME}`
