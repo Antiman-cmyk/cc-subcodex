@@ -34,7 +34,7 @@ For the desktop app, set `CLAUDE_CODE_PLUGIN_DIRS` to this directory under `env`
 
 ## Usage
 
-The main agent dispatches the agent with the Agent tool, `subagent_type: "subcodex:codex"`.
+The main agent dispatches the agent with the Agent tool, `subagent_type: "subcodex:codex"`. The agent takes any task a general-purpose agent would, and its description tells Claude to use it only when you ask: name Codex, OpenAI or GPT, or ask for another model's view.
 
 - **Effort**: the Agent tool's `effort` parameter (low / medium / high / xhigh / max).
 - **Model**: make the first line of the prompt `@codex model=<Codex model id>`. The line is not passed to Codex. It also accepts `effort=<level>`, including `ultra`.

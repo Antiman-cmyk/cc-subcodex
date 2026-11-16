@@ -129,7 +129,7 @@ export const register: Register = on => {
     await $.agent.register({
       name: NAME,
       description:
-        "Has OpenAI Codex (a different model family) do a self-contained coding or investigation task. Use for a second opinion, or when asked to use Codex. The result is Codex's own closing message, as it wrote it; where it ends on a question for you, answer with a message to this agent and Codex goes on. " +
+        "Has OpenAI Codex (a different model family) do any task a general-purpose agent would: research a question, search and read code, carry out multi-step work, write and edit code, review. Use it only when the user asks for it: for Codex, OpenAI or GPT by name, or for another model's view; otherwise choose another agent. The result is Codex's own closing message, as it wrote it; where it ends on a question for you, answer with a message to this agent and Codex goes on. " +
         `Unless the call says otherwise Codex runs as it is configured: model ${model}, reasoning effort ${effort}. ` +
         "Effort: set the Agent tool's `effort` parameter. " +
         "Model: the Agent tool's `model` parameter names Claude models and does not apply here; to choose a Codex model, make the first line of the prompt `@codex model=<id>`" +
