@@ -73,9 +73,9 @@ def main() -> int:
         if not left():
             break
         time.sleep(2)
-    pipes = glob.glob(f'{root}/*.home/.claude/subcodex/run/*.fifo')
+    pipes = glob.glob(f'{root}/*.home/.claude/subcodex/run/*.fifo') + glob.glob(f'{root}/*.home/.claude/subcodex/run/*.pid')
     after = Case('after_every_case', root)
-    after.check(not pipes, f"no pipe to a Codex server is left behind ({len(pipes)} found)")
+    after.check(not pipes, f"no pipe or pid file of a Codex server is left behind ({len(pipes)} found)")
     after.check(not left(), f'no process of the run is still running ({left()[:2]})')
     print(f'{"ok  " if all(ok for ok, _ in after.checks) else "FAIL"} after_every_case', flush=True)
     for ok, what in after.checks:

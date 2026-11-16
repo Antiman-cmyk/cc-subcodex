@@ -132,10 +132,11 @@ def _text(content) -> str:
 
 def claude(c: 'Case', main: list, codex=None, mode: str = 'default', extra: tuple = (), resume: str | None = None,
            timeout: int = 300, kill_after: float | None = None, config: str = '', reviewer: str = 'allow',
-           live: bool = False) -> Session:
+           live: bool = False, prompt: str = 'Go.') -> Session:
     """One headless session in the case's folder and home, its model requests answered by `main`, Codex's by
     `codex` (mocks.py), and Codex's reviewer's with `reviewer`. `config` is more of the home's Codex config.
-    `live`: Codex's requests go to OpenAI instead, on the person's own Codex login (live cases only)."""
+    `live`: Codex's requests go to OpenAI instead, on the person's own Codex login (live cases only).
+    `prompt` is what the session is given, such as a slash command."""
     os.makedirs(c.folder, exist_ok=True)
     os.makedirs(f'{c.home}/.codex', exist_ok=True)
     os.makedirs(f'{c.home}/.claude', exist_ok=True)
@@ -156,7 +157,7 @@ def claude(c: 'Case', main: list, codex=None, mode: str = 'default', extra: tupl
                'HOME': c.home, 'CLAUDE_CONFIG_DIR': f'{c.home}/.claude',
                'ANTHROPIC_BASE_URL': mocks.anthropic, 'ANTHROPIC_API_KEY': 'sk-ant-offline-test', 'MOCK_OPENAI_KEY': 'offline-test',
                'DISABLE_TELEMETRY': '1', 'DISABLE_AUTOUPDATER': '1', 'DISABLE_ERROR_REPORTING': '1'}
-        cmd = [CLAUDE, '-p', 'Go.', '--plugin-dir', MOD, '--plugin-dir', FIXTURE, '--model', 'claude-haiku-5-5', '--permission-mode', mode,
+        cmd = [CLAUDE, '-p', prompt, '--plugin-dir', MOD, '--plugin-dir', FIXTURE, '--model', 'claude-haiku-5-5', '--permission-mode', mode,
                '--output-format', 'stream-json', '--verbose', '--debug-file', os.path.join(c.folder, 'debug.log'),
                *(['--resume', resume] if resume else []), *extra]
         with open(os.path.join(c.folder, 'out.jsonl'), 'w') as out, open(os.path.join(c.folder, 'err.txt'), 'w') as err:

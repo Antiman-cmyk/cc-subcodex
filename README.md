@@ -196,4 +196,5 @@ python3 tests/e2e/run.py --live     # the live cases only
 | `cases/messages.py` | Messages between Codex and its caller, each way |
 | `cases/lifecycle.py` | Resume, stop, kill, continue after either, worktree, parallel agents, parallel agents in a workflow |
 | `cases/bridge.py` | Codex calling session tools (the test tools of the `tests/e2e/fixture/` plugin): a result, a picture, a deny rule, plan mode |
+| `cases/upkeep.py` | `/subcodex` and its cleaning, pipes of servers no longer running, usage links, agent records |
 | `cases/live.py` | Real Codex, with `--live` only: a fix, tool search for a session tool, Codex's reviewer |
