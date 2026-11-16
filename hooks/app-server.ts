@@ -8,7 +8,6 @@ import {
   SHARED,
   UNSHARED,
   USAGE_MARK,
-  VERSION,
 } from './config'
 import { loginOf, ownConfig, skillRoots } from './codex-home'
 import { trace } from './log'
@@ -79,6 +78,19 @@ cd "$1" || exit 0
   mkdir -p "$2/\${link%/*}" && ln -s "$1/$file" "$2/$link"
 done
 exit 0`
+
+let version: string | undefined
+
+/** The mod's version, from its plugin.json; read once. */
+async function versionOf($: EngineInterface): Promise<string> {
+  if (version !== undefined) return version
+  try {
+    const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)) as { version?: unknown }
+    if (typeof manifest.version === 'string') version = manifest.version
+  } catch {
+  }
+  return version ?? 'unknown'
+}
 
 /** Writes one message to the server, after any write still in flight. */
 export async function send($: EngineInterface, conn: Conn, message: Rpc): Promise<void> {
@@ -220,7 +232,7 @@ async function openOnce(
   // The connection is returned even when start-up fails, so that it is closed.
   try {
     const greeted = await request($, conn, 'initialize', {
-      clientInfo: { name: PLUGIN, title: PLUGIN, version: VERSION },
+      clientInfo: { name: PLUGIN, title: PLUGIN, version: await versionOf($) },
       capabilities: { experimentalApi: true },
     })
     conn.isUp = greeted.error === undefined

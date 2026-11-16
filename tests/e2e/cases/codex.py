@@ -8,7 +8,7 @@ import subprocess
 import sys
 import zlib
 
-from ..harness import CODEX, Case, case, claude, codex_task, codex_threads, only_synthetic_at_no_cost
+from ..harness import CODEX, MOD, Case, case, claude, codex_task, codex_threads, only_synthetic_at_no_cost
 from ..mocks import answer, note, patch, run, search, use
 
 FIX = ('*** Begin Patch\n*** Update File: cart.py\n@@\n def total(prices, coupon):\n'
@@ -29,6 +29,10 @@ def fix_auto(c: Case):
             "the edit is a native Edit row of the change, answered from Codex's diff")
     threads = codex_threads(c)
     c.check(threads and all(t['model'] == CODEX and t['effort'] == 'low' for t in threads), 'Codex ran on the model and effort the call named')
+    version = json.load(open(f'{MOD}/.claude-plugin/plugin.json'))['version']
+    agents = {r['headers'].get('user-agent', '') for r in s.mocks.asked('openai')}
+    c.check(agents and all(agent.endswith(f'(subcodex; {version})') for agent in agents),
+            f"Codex was told the mod's version from plugin.json ({sorted(agents)[:1]})")
     link = [p for t in threads for p in glob.glob(f'{c.home}/.codex/sessions/*/*/*/*{t["id"]}.subcodex.jsonl')]
     c.check(link and all(os.path.islink(p) for p in link), "the session file is linked into the person's Codex home for usage tools")
     only_synthetic_at_no_cost(c, s)
