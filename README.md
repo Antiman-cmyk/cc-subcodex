@@ -88,6 +88,7 @@ There are **no Claude model calls inside a Codex agent**, including auto-mode me
 ## Data, login and usage
 
 - **Session data**: kept in `~/.claude/subcodex/codex-home/`, apart from `~/.codex`. Full sessions are kept there so that follow-ups resume the same thread; they do not appear in the session lists or archives of Codex or the ChatGPT desktop app.
+- **Agent records**: one small file per agent in `~/.claude/subcodex/agents/`, naming the Codex thread it goes on in, its model and effort, and messages Codex has not yet taken in. A later message resumes from it after a reload or in a resumed session. `/subcodex clean` removes the records whose session is gone.
 - **Usage**: rows the mod writes into transcripts are stamped `<synthetic>` with zero usage and are not counted as Claude usage; Codex usage counts against your Codex account. When a server stops, its session files are symlinked into `~/.codex/sessions/<year>/<month>/<day>/` (named with `.subcodex`), where usage tools such as codeburn count them.
 - **Configuration used**: default model and effort, sandbox and network access, approval policy, feature flags, personality, `rules`, `hooks.json`. `~/.codex/config.toml` is copied at each start, without the parts that add context.
 - **Not used**: the global `AGENTS.md`, Codex's own skills and plugins, MCP servers from the config, memories, sub-agent roles and global instructions; memories and chronicle are disabled and the notify program is not run. A project's own `AGENTS.md` and project skills still apply.

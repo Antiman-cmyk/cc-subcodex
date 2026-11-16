@@ -1,9 +1,9 @@
 import type { EngineInterface } from 'claude-code'
 
-import { agents } from './agents'
+import { agents, recordOf } from './agents'
 import { ALIVE } from './app-server'
 import { findCodex, loginOf } from './codex-home'
-import { DATA_DIR, OWN_CODEX_HOME, PLUGIN, USAGE_MARK } from './config'
+import { AGENTS_DIR, DATA_DIR, OWN_CODEX_HOME, PLUGIN, USAGE_MARK } from './config'
 import { limitKey, limitText } from './usage'
 import type { Limit } from './types'
 
@@ -25,6 +25,7 @@ echo "sessions=$(find "$home/sessions" "$home/archived_sessions" -type f -name '
 echo "oldest=$(find "$home/sessions" "$home/archived_sessions" -type f -name 'rollout-*.jsonl*' 2>/dev/null | sed 's|.*/rollout-||' | sort | head -1 | cut -c1-10)"
 echo "size=$(du -sh "$0" 2>/dev/null | cut -f1 | tr -d ' ')"
 ls "$home"/*.sqlite >/dev/null 2>&1 && echo "state=$(du -ch "$home"/*.sqlite* 2>/dev/null | tail -1 | cut -f1 | tr -d ' ')"
+echo "records=$(find "$0/agents" -type f -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
 echo "links=$(find "$1/sessions" "$1/archived_sessions" -type l -name "rollout-*$2.jsonl*" 2>/dev/null | wc -l | tr -d ' ')"
 servers=0
 for pipe in "$0"/run/*.fifo; do
@@ -116,21 +117,23 @@ const HOW = [
   `/${COMMAND} clean all      removes all of it, Codex's own databases included: for before uninstalling the mod.`,
 ].join('\n')
 
-/** Drops agent records whose thread has no session file left; returns how many. */
-async function forget($: EngineInterface, left: string): Promise<number> {
+/** Removes the agent records whose thread has no session file left; returns how many. */
+async function forget($: EngineInterface, home: string, left: string): Promise<number> {
   const has = (thread: string | undefined): boolean => thread !== undefined && left.includes(thread)
-  let gone = 0
-  for (const key of await $.store.keys()) {
-    if (!key.startsWith('agent:')) continue
-    const kept = (await $.store.get(key)) as { threadId?: string } | undefined
-    if (has(kept?.threadId)) continue
-    await $.store.delete(key)
-    gone++
+  const folder = `${home}/${AGENTS_DIR}`
+  const gone: string[] = []
+  for (const entry of await $.fs.list(folder).catch(() => [])) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    const path = `${folder}/${entry.name}`
+    if (!has((await recordOf($, path))?.threadId)) gone.push(path)
+  }
+  for (let at = 0; at < gone.length; at += 200) {
+    await $.process.run(['/bin/rm', '-f', ...gone.slice(at, at + 200)])
   }
   for (const agent of agents.values()) {
     if (!has(agent.threadId)) agent.threadId = undefined
   }
-  return gone
+  return gone.length
 }
 
 /** Answers `/subcodex [clean <days> | clean all]`. */
@@ -147,7 +150,6 @@ export async function upkeep($: EngineInterface, typed: string): Promise<string>
       .filter(line => line.includes('='))
       .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
   ) as Record<string, string | undefined>
-  const records = (await $.store.keys()).filter(key => key.startsWith('agent:')).length
 
   const [verb, what] = typed.trim().split(/\s+/)
   if (verb === 'clean') {
@@ -156,15 +158,15 @@ export async function upkeep($: EngineInterface, typed: string): Promise<string>
     if (what === 'all') {
       if (isBusy) return BUSY
       await run(WIPE)
-      const gone = await forget($, '')
+      await forget($, home, '')
       await $.store.delete(LIMITS)
-      return `Removed ${seen.sessions ?? 0} session files, ${seen.links ?? 0} links to them and ${gone} agent records. ${data} is gone; the next Codex agent makes it anew.`
+      return `Removed ${seen.sessions ?? 0} session files, ${seen.links ?? 0} links to them and ${seen.records ?? 0} agent records. ${data} is gone; the next Codex agent makes it anew.`
     }
     const days = Number(what)
     if (what === undefined || !Number.isInteger(days) || days < 0) return `Say how old, or all.\n${HOW}`
     if (isBusy && days === 0) return BUSY
     const files = (await run(PRUNE, String(days))).trim().split('\n')[0] ?? '0'
-    const gone = await forget($, await run(LEFT))
+    const gone = await forget($, home, await run(LEFT))
     return `Removed ${files} session files last written more than ${days} days ago, with their links, and ${gone} agent records that pointed at no session.`
   }
 
@@ -178,7 +180,7 @@ export async function upkeep($: EngineInterface, typed: string): Promise<string>
     `Kept under ${data} (${seen.size ?? '?'}):`,
     `- ${seen.sessions ?? 0} Codex session files${seen.oldest ? `, the oldest from ${seen.oldest}` : ''}: Codex's own full record of each agent's work, which a later message to an agent resumes from.`,
     `- ${seen.links ?? 0} links to them under ${home}/${OWN_CODEX_HOME}/sessions, by which usage tools count these runs as your Codex usage. Codex itself does not list them.`,
-    `- ${records} agent records in the mod's store: which thread each agent goes on in.`,
+    `- ${seen.records ?? 0} agent records: which Codex thread each agent goes on in.`,
     `- Codex's own databases${seen.state === undefined ? '' : ` (${seen.state})`}: its index of threads, and its diagnostic logs, which Codex prunes itself.`,
     '',
     HOW,

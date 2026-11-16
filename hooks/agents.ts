@@ -2,7 +2,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { findCodex } from './codex-home'
 import { COMPACT_MARK } from './compact'
-import { TYPE } from './config'
+import { AGENTS_DIR, TYPE } from './config'
 import type { Agent, Settings } from './types'
 
 /** This session's Codex agents, by agent id. */
@@ -29,8 +29,9 @@ export async function typeOf($: EngineInterface, agentId: string): Promise<strin
   const known = types.get(agentId)
   if (known !== undefined) return known
   const info = (await $.agent.list()).find(agent => agent.id === agentId)
-  const kept = info === undefined ? await $.store.get(`agent:${agentId}`).catch(() => undefined) : undefined
-  const type = info?.type ?? (kept === undefined ? undefined : TYPE)
+  const path = info === undefined ? await recordPath($, agentId) : undefined
+  const isKept = path !== undefined && (await $.fs.exists(path).catch(() => false))
+  const type = info?.type ?? (isKept ? TYPE : undefined)
   if (type !== undefined) {
     types.set(agentId, type)
     return type
@@ -107,27 +108,65 @@ export async function settingsFor(
   }
 }
 
-/** Stores an agent's record, for a later session or a reload. */
+/** The file of an agent's record (`AGENTS_DIR`); undefined without a home directory. */
+export async function recordPath($: EngineInterface, agentId: string): Promise<string | undefined> {
+  const { home } = await findCodex($)
+  if (home === '') return undefined
+  return `${home}/${AGENTS_DIR}/${encodeURIComponent(agentId).replace(/\./g, '%2E')}.json`
+}
+
+/** What an agent's record holds. */
+export type AgentRecord = {
+  threadId?: string
+  settings?: Settings
+  mode?: string
+  cwd?: string
+  caller?: string
+  unsent?: string[]
+  isWorkflow?: boolean
+}
+
+/** Each agent's latest record write, which the next one waits for. */
+const writing = new Map<string, Promise<void>>()
+
+/** Writes an agent's record, for a later session or a reload; one write at a time per agent. */
 export async function remember(
   $: EngineInterface,
   agentId: string,
   agent: Agent,
 ): Promise<void> {
+  const write = async (): Promise<void> => {
+    try {
+      const path = await recordPath($, agentId)
+      if (path === undefined) return
+      const record: AgentRecord = {
+        threadId: agent.threadId,
+        settings: agent.settings,
+        mode: agent.mode,
+        cwd: agent.cwd,
+        caller: agent.caller,
+        unsent: agent.unsent,
+        isWorkflow: agent.isWorkflow,
+      }
+      await $.fs.write(path, JSON.stringify(record))
+    } catch {
+    }
+  }
+  const written = (writing.get(agentId) ?? Promise.resolve()).then(write)
+  writing.set(agentId, written)
+  await written
+}
+
+/** An agent's record, read from its file; undefined if there is none or it cannot be read. */
+export async function recordOf($: EngineInterface, path: string): Promise<AgentRecord | undefined> {
   try {
-    await $.store.set(`agent:${agentId}`, {
-      threadId: agent.threadId,
-      settings: agent.settings,
-      mode: agent.mode,
-      cwd: agent.cwd,
-      caller: agent.caller,
-      unsent: agent.unsent,
-      isWorkflow: agent.isWorkflow,
-    })
+    return JSON.parse(await $.fs.read(path)) as AgentRecord
   } catch {
+    return undefined
   }
 }
 
-/** An agent's record: kept in memory, else restored from the store. */
+/** An agent's record: kept in memory, else restored from its file. */
 export async function agentOf(
   $: EngineInterface,
   agentId: string,
@@ -135,17 +174,8 @@ export async function agentOf(
   const known = agents.get(agentId)
   if (known !== undefined) return known
   if ((await typeOf($, agentId)) !== TYPE) return undefined
-  const kept = (await $.store.get(`agent:${agentId}`).catch(() => undefined)) as
-    | {
-        threadId?: string
-        settings?: Settings
-        mode?: string
-        cwd?: string
-        caller?: string
-        unsent?: string[]
-        isWorkflow?: boolean
-      }
-    | undefined
+  const path = await recordPath($, agentId)
+  const kept = path === undefined ? undefined : await recordOf($, path)
   const agent = newAgent(
     kept?.settings ?? (await settingsFor($, '', undefined)),
     kept?.mode,

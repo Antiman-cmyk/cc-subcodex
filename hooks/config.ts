@@ -22,6 +22,8 @@ export const CLAUDE_TOOL = `mcp__${PLUGIN}__claude_tool`
 export const DATA_DIR = `.claude/${PLUGIN}`
 /** The Codex home the mod's app-servers run on. */
 export const CODEX_HOME = `${DATA_DIR}/codex-home`
+/** One record per Codex agent (`<agent id>.json`): the thread it goes on in. */
+export const AGENTS_DIR = `${DATA_DIR}/agents`
 /** Pipes to running app-servers (mode 700). */
 export const RUN_DIR = `${DATA_DIR}/run`
 /** Entries of the person's Codex home linked into the mod's. */

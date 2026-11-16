@@ -1,7 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 
-import { agentOf, merged, newAgent, saidTo, untaken } from '../../hooks/agents'
+import { agentOf, merged, newAgent, recordPath, remember, saidTo, untaken } from '../../hooks/agents'
 
 // What an agent has been told, and which of it is new since its last reply.
 
@@ -58,13 +58,25 @@ describe('messages Codex has not taken in', () => {
   })
 })
 
+/** A session that lists no agents, with the given files under the home directory `/h`. */
+const filesOf = (files: Record<string, string>) =>
+  ({
+    agent: { list: async () => [] },
+    env: { get: async (name: string) => (name === 'HOME' ? '/h' : undefined) },
+    process: { run: async () => ({ stdout: '', stderr: '', code: 0 }) },
+    fs: {
+      exists: async (path: string) => path in files,
+      read: async (path: string) => {
+        if (!(path in files)) throw new Error('ENOENT')
+        return files[path]
+      },
+    },
+  }) as unknown as EngineInterface
+
 describe('an agent the session does not list', () => {
   test("is a Codex agent where the mod keeps its record (a workflow's), restored with its thread and messages", async () => {
     const record = { threadId: 'thread-1', settings: { model: 'gpt-x', effort: 'low' }, mode: 'auto', unsent: ['Go on.'], isWorkflow: true }
-    const $ = {
-      agent: { list: async () => [] },
-      store: { get: async (key: string) => (key === 'agent:wf-agent-1' ? record : undefined) },
-    } as unknown as EngineInterface
+    const $ = filesOf({ '/h/.claude/subcodex/agents/wf-agent-1.json': JSON.stringify(record) })
     const agent = await agentOf($, 'wf-agent-1')
     expect(agent?.threadId).toBe('thread-1')
     expect(agent?.unsent).toEqual(['Go on.'])
@@ -72,7 +84,36 @@ describe('an agent the session does not list', () => {
   })
 
   test('is not one where the mod keeps no record', async () => {
-    const $ = { agent: { list: async () => [] }, store: { get: async () => undefined } } as unknown as EngineInterface
-    expect(await agentOf($, 'someone-else')).toBe(undefined)
+    expect(await agentOf(filesOf({}), 'someone-else')).toBe(undefined)
+  })
+})
+
+describe("an agent's record", () => {
+  test('is a file named by the agent id, which cannot leave the records folder', async () => {
+    const $ = filesOf({})
+    expect(await recordPath($, 'a1b2c3')).toBe('/h/.claude/subcodex/agents/a1b2c3.json')
+    expect(await recordPath($, '../x')).toBe('/h/.claude/subcodex/agents/%2E%2E%2Fx.json')
+  })
+
+  test('is written one write at a time, the later state last', async () => {
+    const steps: string[] = []
+    let open = 0
+    const $ = {
+      ...filesOf({}),
+      fs: {
+        write: async (_path: string, text: string) => {
+          open++
+          steps.push(`${open}:${(JSON.parse(text) as { unsent: string[] }).unsent.length}`)
+          await new Promise(resolve => setTimeout(resolve, 5))
+          open--
+        },
+      },
+    } as unknown as EngineInterface
+    const agent = agentWith(1)
+    agent.unsent = ['One.']
+    const first = remember($, 'a1', agent)
+    agent.unsent = ['One.', 'Two.']
+    await Promise.all([first, remember($, 'a1', agent)])
+    expect(steps).toEqual(['1:2', '1:2'])
   })
 })
