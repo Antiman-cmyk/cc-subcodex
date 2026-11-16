@@ -98,8 +98,8 @@ There are **no Claude model calls inside a Codex agent**, including auto-mode me
 
 | Command | Effect |
 |---|---|
-| `/subcodex` | Shows the Codex binary and version, default model and effort, login, the usage limits last reported, and the session files, links and records kept |
-| `/subcodex clean <days>` | Removes session files older than the given number of days, with their links and records |
+| `/subcodex` | Shows the Codex binary and version, default model and effort, login, the usage limits last reported, and what is kept: session files, links, records, and Codex's own databases |
+| `/subcodex clean <days>` | Removes session files older than the given number of days, with their links and records; Codex's own databases stay (Codex prunes its logs itself) |
 | `/subcodex clean all` | Removes every link and all of `~/.claude/subcodex/`; use before uninstalling |
 
 Sessions are never removed automatically. Cleaning touches only the mod's own files, and `clean all` does nothing while a Codex agent is running. If the mod was uninstalled without cleaning:

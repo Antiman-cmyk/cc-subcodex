@@ -20,9 +20,11 @@ export const COMMAND = PLUGIN
 /** Counts what is kept, one `name=value` per line; `servers` counts those running. */
 const LOOK = `${ALIVE}
 home="$0/codex-home"
+[ -d "$0" ] && echo "kept=yes"
 echo "sessions=$(find "$home/sessions" "$home/archived_sessions" -type f -name 'rollout-*.jsonl*' 2>/dev/null | wc -l | tr -d ' ')"
 echo "oldest=$(find "$home/sessions" "$home/archived_sessions" -type f -name 'rollout-*.jsonl*' 2>/dev/null | sed 's|.*/rollout-||' | sort | head -1 | cut -c1-10)"
 echo "size=$(du -sh "$0" 2>/dev/null | cut -f1 | tr -d ' ')"
+ls "$home"/*.sqlite >/dev/null 2>&1 && echo "state=$(du -ch "$home"/*.sqlite* 2>/dev/null | tail -1 | cut -f1 | tr -d ' ')"
 echo "links=$(find "$1/sessions" "$1/archived_sessions" -type l -name "rollout-*$2.jsonl*" 2>/dev/null | wc -l | tr -d ' ')"
 servers=0
 for pipe in "$0"/run/*.fifo; do
@@ -110,8 +112,8 @@ async function standing($: EngineInterface): Promise<string[]> {
 const BUSY = 'A Codex agent is at work, in this session or another. Clean when it has finished.'
 
 const HOW = [
-  `/${COMMAND} clean <days>   removes the session files last written more than <days> days ago, with their links and records. An agent whose session is gone starts afresh if it is sent another message, and usage tools no longer find those sessions.`,
-  `/${COMMAND} clean all      removes all of it: for before uninstalling the mod.`,
+  `/${COMMAND} clean <days>   removes the session files last written more than <days> days ago, with their links and records; Codex's own databases stay. An agent whose session is gone starts afresh if it is sent another message, and usage tools no longer find those sessions.`,
+  `/${COMMAND} clean all      removes all of it, Codex's own databases included: for before uninstalling the mod.`,
 ].join('\n')
 
 /** Drops agent records whose thread has no session file left; returns how many. */
@@ -167,7 +169,7 @@ export async function upkeep($: EngineInterface, typed: string): Promise<string>
   }
 
   const stands = await standing($)
-  if (Number(seen.sessions ?? 0) === 0 && Number(seen.links ?? 0) === 0 && records === 0) {
+  if (seen.kept !== 'yes') {
     return [...stands, '', 'Nothing is kept on disk yet: no Codex agent has run.'].join('\n')
   }
   return [
@@ -177,6 +179,7 @@ export async function upkeep($: EngineInterface, typed: string): Promise<string>
     `- ${seen.sessions ?? 0} Codex session files${seen.oldest ? `, the oldest from ${seen.oldest}` : ''}: Codex's own full record of each agent's work, which a later message to an agent resumes from.`,
     `- ${seen.links ?? 0} links to them under ${home}/${OWN_CODEX_HOME}/sessions, by which usage tools count these runs as your Codex usage. Codex itself does not list them.`,
     `- ${records} agent records in the mod's store: which thread each agent goes on in.`,
+    `- Codex's own databases${seen.state === undefined ? '' : ` (${seen.state})`}: its index of threads, and its diagnostic logs, which Codex prunes itself.`,
     '',
     HOW,
   ].join('\n')
