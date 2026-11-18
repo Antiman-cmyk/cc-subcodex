@@ -11,7 +11,7 @@ import { NEARLY, limitKey, limitText } from './usage'
 import { addOutput } from './live'
 import { trace } from './log'
 import type { Agent, Conn, Ev, Rpc, Run } from './types'
-import { linkSessions } from './usage-links'
+import { linkSessions, newUnmadeNote } from './usage-links'
 
 /** A turn's run: its events, its answers to the server, and the maps its rows fill. */
 const runOf = (pull: Run['pull'], reply: Run['reply'], tools: Run['tools'] = new Map()): Run => ({
@@ -152,6 +152,12 @@ function codexRun(
     ready.push({ t: 'text', text }, { t: 'done' })
     hasEnded = true
   }
+  /** Says in the agent's transcript, once a session, which of the mod's links could not be made. */
+  const tellUnmade = (): void => {
+    if (hasEnded) return
+    const note = newUnmadeNote($)
+    if (note !== undefined) ready.push({ t: 'text', text: `[${note}]`, isAside: true })
+  }
 
   const begin = async (): Promise<void> => {
     const { bin, home, hasApprovalPolicy, isHostMissing } = await findCodex($)
@@ -176,6 +182,7 @@ function codexRun(
       )
       return
     }
+    tellUnmade()
     let asked = prompt
     if (conn.threadId === undefined) {
       const policy = policyFor(agent.mode, hasApprovalPolicy, effort)
@@ -242,7 +249,7 @@ function codexRun(
     }
     conn.turnId = begun.result?.turn?.id as string | undefined
     // The thread's session file exists from here: it is linked for usage tools.
-    void linkSessions($, conn.home)
+    void linkSessions($, conn.home).then(tellUnmade, () => undefined)
   }
 
   /** The sub-agent a thread other than the agent's own belongs to. */

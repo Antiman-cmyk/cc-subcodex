@@ -6,7 +6,7 @@ A Claude Code mod that adds OpenAI Codex as a native subagent type, `subcodex:co
 
 - Claude Code 2.1.32x (the Mod API is in early access).
 - The Codex CLI, installed and logged in with a ChatGPT account (developed against codex-cli 0.165.0; uses experimental app-server APIs). An API key saved with `codex login --with-api-key` is not used. To use an API key, define a model provider in `~/.codex/config.toml` that reads the key from an environment variable (`env_key`), and set that variable for Claude Code.
-- macOS, Linux or Windows. On Windows: PowerShell 7 (`pwsh`) installed and on the PATH, in which the mod's own work there runs; Developer Mode on (Settings > System > For developers): the mod makes symbolic links.
+- macOS, Linux or Windows. On Windows: PowerShell 7 (`pwsh`) installed and on the PATH, in which the mod's own work there runs; Developer Mode on (Settings > System > For developers): the mod makes symbolic links. Where it cannot make them, `/subcodex` and the agent's transcript say so, and the session makes no more usage links.
 
 ## Installation
 
@@ -38,7 +38,7 @@ The main agent dispatches the agent with the Agent tool, `subagent_type: "subcod
 
 - **Effort**: the Agent tool's `effort` parameter (low / medium / high / xhigh / max).
 - **Model**: make the first line of the prompt `@codex model=<Codex model id>`. The line is not passed to Codex. It also accepts `effort=<level>`, including `ultra`.
-- **Defaults**: without either, the model and effort in `~/.codex/config.toml`. The task title shows the model and effort in use.
+- **Defaults**: without either, the model and effort in `~/.codex/config.toml`: its active profile's (`profile`), else those at its top. The task title shows the model and effort in use.
 - **Follow-ups**: send the agent a message after it finishes; Codex continues in the same thread.
 - **Steering**: a message sent while the agent runs goes into Codex's current turn. One that Codex does not take in before its turn ends starts another Codex turn before the agent finishes.
 - **Stopping**: stopping the agent interrupts Codex's current turn. A later message continues the same thread; messages Codex had not yet taken in are kept in the agent's record, across a restart too, and given to it with the new one.
@@ -71,8 +71,8 @@ There are **no Claude model calls inside a Codex agent**, including auto-mode me
 
 ## Permissions
 
-- **Sandbox**: as configured for Codex (`sandbox_mode`, network access). On Windows, where the Codex config sets neither `features.prefer_mxc` nor `windows.sandbox`, Codex prefers its MXC sandbox (`features.prefer_mxc=true`, with `suppress_unstable_features_warning=true`); on a device without MXC, Codex chooses its sandbox as it does by itself.
-- **When Codex asks**: per `approval_policy` in the Codex config; if unset, when it needs more than the sandbox allows.
+- **Sandbox**: as configured for Codex (`sandbox_mode`, network access). On Windows, where the Codex config sets neither `features.prefer_mxc` nor `windows.sandbox`, at its top or in its active profile, Codex prefers its MXC sandbox (`features.prefer_mxc=true`, with `suppress_unstable_features_warning=true`); on a device without MXC, Codex chooses its sandbox as it does by itself.
+- **When Codex asks**: per `approval_policy` in the Codex config, at its top or in its active profile; if unset, when it needs more than the sandbox allows.
 - **Who approves**: Codex's own automatic reviewer (`auto_review`, "Approve for me" in the Codex app). When it refuses, Codex takes a safer route or ends its turn asking for approval; once the caller explicitly approves, Codex goes on. Each decision is a line in the transcript.
 - **Plan mode**: the sandbox is read-only, and every request for more is refused.
 - Claude's Bash allow and deny rules do not apply to Codex's commands; Codex's reviewer and `~/.codex/rules` do.
@@ -99,7 +99,7 @@ There are **no Claude model calls inside a Codex agent**, including auto-mode me
 
 | Command | Effect |
 |---|---|
-| `/subcodex` | Shows the Codex binary and version, default model and effort, login, the usage limits last reported, and what is kept: session files, links, records, and Codex's own databases |
+| `/subcodex` | Shows the Codex binary and version, default model and effort, the links the session could not make, login, the usage limits last reported, and what is kept: session files, links, records, and Codex's own databases |
 | `/subcodex clean <days>` | Removes session files older than the given number of days, with their links and records; Codex's own databases stay (Codex prunes its logs itself). Links the other session files are missing are made as the next Codex agent starts |
 | `/subcodex clean all` | Removes every link and all of `~/.claude/subcodex/`; use before uninstalling |
 
@@ -146,7 +146,7 @@ Get-ChildItem "$HOME\.codex\sessions" -Recurse -Filter '*.subcodex.jsonl*' -Attr
 | `hooks/steps.ts` | Writes Codex's events as steps of the agent |
 | `hooks/turn.ts` | A Codex turn: open or resume the thread, a turn or a review, read events, answer server requests |
 | `hooks/app-server.ts` | Start app-server, send and receive, log in, stop |
-| `hooks/usage-links.ts` | Usage links: the session files linked into `~/.codex` |
+| `hooks/usage-links.ts` | Usage links: the session files linked into `~/.codex`; the links a session could not make |
 | `hooks/events.ts` | Maps app-server notifications to events |
 | `hooks/agents.ts` | Agent state, settings and persistence |
 | `hooks/model-mock.ts` | Intercepts model requests and supplies local mock responses |
@@ -208,5 +208,5 @@ python3 tests/e2e/run.py --live     # the live cases only
 | `cases/messages.py` | Messages between Codex and its caller, each way |
 | `cases/lifecycle.py` | Resume, stop, kill, continue after either, worktree, parallel agents, parallel agents in a workflow |
 | `cases/bridge.py` | Codex calling session tools (the test tools of the `tests/e2e/fixture/` plugin): a result, a picture, a deny rule, plan mode |
-| `cases/upkeep.py` | `/subcodex` and its cleaning, pipes of servers no longer running, usage links, agent records |
+| `cases/upkeep.py` | `/subcodex` and its cleaning, pipes of servers no longer running, usage links and links that cannot be made, agent records |
 | `cases/live.py` | Real Codex, with `--live` only: a fix, tool search for a session tool, Codex's reviewer |

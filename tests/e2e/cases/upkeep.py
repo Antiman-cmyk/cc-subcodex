@@ -1,5 +1,5 @@
 """The mod's own housekeeping: `/subcodex` and its cleaning, the pipes of servers no longer running, the
-usage links, the agent records."""
+usage links and links that cannot be made, the agent records."""
 import glob
 import json
 import os
@@ -9,7 +9,7 @@ import time
 
 from .. import host
 from ..harness import Case, case, claude, codex_task, usage_links
-from ..mocks import LINES, answer, run
+from ..mocks import LINES, agent_id, answer, call, latest, run, say
 
 
 def _pipe(c: Case, name: str, pid: int) -> str:
@@ -31,6 +31,16 @@ def _gone(c: Case, day: str) -> str:
     link = f'{c.home}/.codex/sessions/{day}/{name}.subcodex.jsonl'
     os.symlink(f'{c.home}/.claude/subcodex/codex-home/sessions/{day}/{name}.jsonl', link)
     return link
+
+
+def _today() -> str:
+    """Today's local date as `<year>/<month>/<day>`, the day folder an agent's Codex session goes in; past midnight
+    when it is less than 3 minutes away, so that a dispatch ends on the same date."""
+    now = time.localtime()
+    to_midnight = 86400 - (now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec)
+    if to_midnight < 180:
+        time.sleep(to_midnight + 2)
+    return time.strftime('%Y/%m/%d')
 
 
 def _ended() -> int:
@@ -60,16 +70,34 @@ def upkeep_without_pwsh(c: Case):
 
 
 @case
+def upkeep_links_unmade(c: Case):
+    """Where the mod's links cannot be made, Codex still runs, and the agent's transcript says so once."""
+    c.plain()
+    # A file where today's day folder of the case's own Codex sessions would be: no usage link can go in it.
+    blocked = f'{c.home}/.codex/sessions/{_today()}'
+    os.makedirs(os.path.dirname(blocked), exist_ok=True)
+    open(blocked, 'w').write('not a folder\n')
+    main = [codex_task('Count the lines of notes.txt.'),
+            lambda body: call('SendMessage', to=agent_id(body), message='Count them again.', summary='Again'),
+            say('Waiting for the agent.'),
+            lambda body: say(f'Its answer: {latest(body)}')]
+    s = claude(c, main, [[run(LINES)], answer('notes.txt has 3 lines.'), [run(LINES)], answer('Still 3 lines.')])
+    c.check('Still 3 lines.' in s.result, f'Codex ran both turns all the same ({s.result[:120]!r})')
+    said = [r['text'] for rows in s.agents for r in rows if r['kind'] == 'text' and 'could not make its symbolic links' in r['text']]
+    c.check(len(said) == 1 and "usage tools do not count Codex's sessions" in said[0],
+            f"the agent's transcript says once that the usage links could not be made ({said[:2]})")
+    failed = [at for at in range(len(s.log)) if s.log.startswith('usage links: not all could be made', at)]
+    second = s.log.find('Codex turn 2')
+    c.check(failed and second > 0 and all(at < second for at in failed), 'after the pass that failed, no more passes were made in the session')
+
+
+@case
 def upkeep_default(c: Case):
     c.plain()
     # Left over: a pipe whose server is gone; in the day folder the agent's session goes in (Codex's local date), a
     # link of the mod's whose session file is gone and a link of the person's own.
     stale = _pipe(c, 'stale', _ended())
-    now = time.localtime()
-    to_midnight = 86400 - (now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec)
-    if to_midnight < 180:  # the dispatch ends on the same local date
-        time.sleep(to_midnight + 2)
-    today = time.strftime('%Y/%m/%d')
+    today = _today()
     gone_today = _gone(c, today)
     theirs = f'{c.home}/.codex/sessions/{today}/rollout-{today.replace("/", "-")}T00-00-00-theirs.jsonl'
     os.symlink(f'{c.home}/elsewhere/rollout-theirs.jsonl', theirs)

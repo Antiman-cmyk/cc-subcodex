@@ -12,7 +12,7 @@ import { loginOf, ownConfig, sandboxChoice, skillRoots } from './codex-home'
 import { hostCommand, hostRun } from './host'
 import { trace } from './log'
 import type { Conn, Rpc } from './types'
-import { linkSessions } from './usage-links'
+import { checkShared, linkSessions } from './usage-links'
 
 // Runs `codex app-server` and speaks its newline-delimited JSON-RPC, through
 // the host operations of host.ts: the server's stdin is a pipe the mod writes
@@ -188,6 +188,7 @@ async function openOnce(
     })
     conn.isUp = greeted.error === undefined
     if (!conn.isUp) return conn
+    await checkShared($, home)
     await send($, conn, { method: 'initialized' })
     const login = await loginOf($, home)
     if (login !== undefined) {

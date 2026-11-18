@@ -133,16 +133,26 @@ describe('the copy of the Codex config', () => {
 })
 
 describe("the person's Codex defaults", () => {
-  test('are the model and effort set before the first header', () => {
+  test("are the active profile's model and effort, else those set before the first header", () => {
+    const profiled = 'model = "A"\nmodel_reasoning_effort = "low"\nprofile = "x"\n\n[profiles.x]\nmodel = "B"\n\n[profiles.y]\nmodel_reasoning_effort = "high"'
+    expect(defaultsOf(profiled).defaults).toEqual({ model: 'B', effort: 'low' })
+    expect(defaultsOf(profiled.replace('profile = "x"', 'profile = "y"')).defaults).toEqual({ model: 'A', effort: 'high' })
+    expect(defaultsOf(profiled.replace('profile = "x"\n', '')).defaults).toEqual({ model: 'A', effort: 'low' })
+    expect(defaultsOf("profile = 'my work'\nprofiles.\"my work\".model = \"C\"").defaults.model).toBe('C')
+  })
+
+  test('are otherwise the model and effort set before the first header', () => {
     expect(defaultsOf(CONFIG)).toEqual({ defaults: { model: 'gpt-x', effort: undefined }, hasApprovalPolicy: true })
     expect(defaultsOf("  \"model\" = 'gpt-y'\nmodel_reasoning_effort = \"high\"\n").defaults).toEqual({ model: 'gpt-y', effort: 'high' })
     expect(defaultsOf('[profiles.work]\nmodel = "gpt-z"\nmodel_reasoning_effort = "low"').defaults).toEqual({ model: undefined, effort: undefined })
     expect(defaultsOf('model = 5\nmodel_reasoning_effort = ""').defaults).toEqual({ model: undefined, effort: undefined })
   })
 
-  test('set an approval policy only by its own key before the first header', () => {
+  test('set an approval policy only by its own key, before the first header or in the active profile', () => {
     expect(defaultsOf('approval_policy = "never"').hasApprovalPolicy).toBe(true)
     expect(defaultsOf('"approval_policy" = "never"').hasApprovalPolicy).toBe(true)
+    expect(defaultsOf('profile = "x"\n[profiles.x]\napproval_policy = "never"').hasApprovalPolicy).toBe(true)
+    expect(defaultsOf('profile = "y"\n[profiles.x]\napproval_policy = "never"').hasApprovalPolicy).toBe(false)
     for (const config of ['', 'approval_policy.x = 1', '[approval_policy]\nx = 1', '[profiles.work]\napproval_policy = "never"', 'notes = """\napproval_policy = "never"\n"""']) {
       expect(defaultsOf(config).hasApprovalPolicy).toBe(false)
     }

@@ -1,10 +1,11 @@
 import type { EngineInterface } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 
-import { forgetLastPass, linkSessions } from '../../hooks/usage-links'
+import { checkShared, forgetLastPass, linkSessions, newUnmadeNote, unmadeNote } from '../../hooks/usage-links'
 
 // The usage links: which day folders a pass looks at, the links it makes and
-// removes there, and when it records itself.
+// removes there, and when it records itself; and what is said of links that
+// could not be made.
 
 const MOD = '/h/.claude/subcodex/codex-home/sessions'
 const OWN = '/h/.codex/sessions'
@@ -47,6 +48,7 @@ function homeOf(nodes: Record<string, Node>, exitCode = 0) {
           }))
       },
       stat: async (path: string) => statOf(path),
+      exists: async (path: string) => all.has(path),
       read: async (path: string) => {
         const found = text.get(path)
         if (found === undefined) throw new Error(`ENOENT: ${path}`)
@@ -62,6 +64,7 @@ function homeOf(nodes: Record<string, Node>, exitCode = 0) {
         return { exitCode, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
       },
     },
+    ui: { log: () => undefined },
   } as unknown as EngineInterface
   return { $, runs, text }
 }
@@ -158,13 +161,6 @@ describe('a pass of the usage links', () => {
     expect(text.has(RECORD)).toBe(true)
   })
 
-  test('a pass whose links were not all made leaves the record as it was', async () => {
-    const now = Date.now()
-    const { $, text } = homeOf({ [`${MOD}/2026/11/18/rollout-f.jsonl`]: { kind: 'file', mtimeMs: now } }, 1)
-    await linkSessions($, '/h')
-    expect(text.has(RECORD)).toBe(false)
-  })
-
   test('once the last pass is forgotten, the next looks at every day folder', async () => {
     const now = Date.now()
     const { $, runs, text } = homeOf({
@@ -183,5 +179,39 @@ describe('a pass of the usage links', () => {
     const { $, runs } = homeOf({})
     await linkSessions($, '/h')
     expect(runs).toEqual([])
+  })
+})
+
+// What a session could not link stays with it, so these come last, in order.
+describe('links that could not be made', () => {
+  test('none yet: nothing is said', () => {
+    expect(unmadeNote(homeOf({}).$)).toBe(undefined)
+  })
+
+  test("what the mod's Codex home lacks of what it shares from the person's, once a server has started", async () => {
+    const { $ } = homeOf({
+      '/h/.codex/rules/default.rules': { kind: 'file', mtimeMs: 0 },
+      '/h/.codex/hooks.json': { kind: 'file', mtimeMs: 0 },
+      '/h/.claude/subcodex/codex-home/rules': { kind: 'link', to: '/h/.codex/rules' },
+    })
+    await checkShared($, '/h')
+    expect(unmadeNote($)).toContain('could not make its symbolic links, so Codex runs without hooks.json from your Codex home.')
+  })
+
+  test('a pass whose links were not all made leaves the record as it was, and is the last of the session', async () => {
+    const now = Date.now()
+    const failed = homeOf({ [`${MOD}/2026/11/18/rollout-f.jsonl`]: { kind: 'file', mtimeMs: now } }, 1)
+    await linkSessions(failed.$, '/h')
+    expect(failed.text.has(RECORD)).toBe(false)
+    const later = homeOf({ [`${MOD}/2026/11/18/rollout-g.jsonl`]: { kind: 'file', mtimeMs: now } })
+    await linkSessions(later.$, '/h')
+    expect(later.runs).toEqual([])
+    expect(unmadeNote(later.$)).toContain("Codex runs without hooks.json from your Codex home, and usage tools do not count Codex's sessions.")
+  })
+
+  test("an agent's transcript is given each new note once", () => {
+    const { $ } = homeOf({})
+    expect(newUnmadeNote($)).toBe(unmadeNote($))
+    expect(newUnmadeNote($)).toBe(undefined)
   })
 })

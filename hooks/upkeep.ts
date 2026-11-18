@@ -6,7 +6,7 @@ import { AGENTS_DIR, DATA_DIR, OWN_CODEX_HOME, PLUGIN, USAGE_MARK } from './conf
 import { HOST_MISSING, codexSearch, hostRun, isAbsolute, type Op } from './host'
 import { limitKey, limitText } from './usage'
 import type { Limit } from './types'
-import { forgetLastPass } from './usage-links'
+import { forgetLastPass, unmadeNote } from './usage-links'
 
 // `/subcodex`: the mod's status (Codex, defaults, login, last usage limits),
 // what it keeps on disk (session files, their links in the person's Codex
@@ -29,7 +29,7 @@ export async function keepLimits($: EngineInterface, limits: Map<string, Limit>)
   await $.store.set(LIMITS, { at: Date.now(), limits: [...known.values()] })
 }
 
-/** Status lines: Codex, its defaults, the login, the last usage limits. */
+/** Status lines: Codex, its defaults, links that could not be made, the login, the last usage limits. */
 async function standing($: EngineInterface): Promise<string[]> {
   const { bin, home, defaults, isHostMissing } = await findCodex($)
   const lines: string[] = []
@@ -44,6 +44,8 @@ async function standing($: EngineInterface): Promise<string[]> {
       `Codex: ${bin}${version === undefined || version === '' ? '' : ` (${version})`}. An agent runs on model ${defaults.model ?? "Codex's own default"}, effort ${defaults.effort ?? "Codex's own default"}, unless its call says otherwise.`,
     )
   }
+  const unmade = unmadeNote($)
+  if (unmade !== undefined) lines.push(`Links: ${unmade}`)
   const login = `${home}/${OWN_CODEX_HOME}/auth.json`
   lines.push(
     (await loginOf($, home)) === undefined

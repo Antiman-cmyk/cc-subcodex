@@ -1,7 +1,8 @@
 import type { EngineInterface, FsEntry } from 'claude-code'
 
-import { CODEX_HOME, DATA_DIR, OWN_CODEX_HOME, USAGE_MARK } from './config'
-import { hostRun } from './host'
+import { CODEX_HOME, DATA_DIR, OWN_CODEX_HOME, SHARED, USAGE_MARK } from './config'
+import { hostRun, isWindows } from './host'
+import { trace } from './log'
 
 // Links the session files of the mod's Codex home into the person's, where
 // usage tools count them: `sessions/<year>/<month>/<day>/rollout-….jsonl` of
@@ -17,6 +18,11 @@ import { hostRun } from './host'
 const RECORD = `${DATA_DIR}/usage-links.json`
 /** How long before the last pass began a folder's time still counts as a change. */
 const MARGIN_MS = 60_000
+
+/** The links this session could not make: what of the person's Codex home the mod's lacks, and the usage links. */
+const unmade: { shared: string[]; isUsage: boolean } = { shared: [], isUsage: false }
+/** The note of unmade links last put in an agent's transcript in this session. */
+let told: string | undefined
 
 /** Whether an entry is a session file of Codex's. */
 const isSession = (entry: FsEntry): boolean =>
@@ -98,6 +104,8 @@ export async function forgetLastPass($: EngineInterface, home: string): Promise<
  * there that lead to no file. The pass is recorded once every link is made.
  */
 export async function linkSessions($: EngineInterface, home: string): Promise<void> {
+  // After a pass that could not make a link, none is made again in this session.
+  if (unmade.isUsage) return
   const began = Date.now()
   const record = `${home}/${RECORD}`
   const last = await lastPass($, record)
@@ -110,7 +118,48 @@ export async function linkSessions($: EngineInterface, home: string): Promise<vo
   const changes = (await eachOf(changed, day => dayChanges($, `${mod}/${day}`, `${own}/${day}`))).flat()
   if (changes.length > 0) {
     const made = await hostRun($, 'links', changes).catch(() => undefined)
-    if (made?.exitCode !== 0) return
+    if (made === undefined) return
+    if (made.exitCode !== 0) {
+      unmade.isUsage = true
+      trace($, 'usage links: not all could be made; no more passes in this session')
+      return
+    }
   }
   await $.fs.write(record, JSON.stringify({ began })).catch(() => undefined)
+}
+
+/**
+ * Notes what the mod's Codex home lacks of what it shares from the person's
+ * (`SHARED`), once a server's start has linked them.
+ */
+export async function checkShared($: EngineInterface, home: string): Promise<void> {
+  const lacks = await Promise.all(
+    SHARED.map(
+      async name =>
+        (await $.fs.exists(`${home}/${OWN_CODEX_HOME}/${name}`).catch(() => false)) &&
+        !(await $.fs.exists(`${home}/${CODEX_HOME}/${name}`).catch(() => true)),
+    ),
+  )
+  unmade.shared = SHARED.filter((_, at) => lacks[at] === true)
+}
+
+/** What is said of the links this session could not make; undefined while it has made every one. */
+export function unmadeNote($: EngineInterface): string | undefined {
+  const lost = [
+    ...(unmade.shared.length > 0 ? [`Codex runs without ${unmade.shared.join(', ')} from your Codex home`] : []),
+    ...(unmade.isUsage ? ["usage tools do not count Codex's sessions"] : []),
+  ]
+  if (lost.length === 0) return undefined
+  const fix = isWindows($)
+    ? 'On Windows they need Developer Mode (Settings > System > For developers): turn it on, then start a new session.'
+    : 'Check that the folders they go in can be written to, then start a new session.'
+  return `The subcodex mod could not make its symbolic links, so ${lost.join(', and ')}. ${fix}`
+}
+
+/** The note of unmade links for an agent's transcript, where this session has not put it in one yet. */
+export function newUnmadeNote($: EngineInterface): string | undefined {
+  const note = unmadeNote($)
+  if (note === undefined || note === told) return undefined
+  told = note
+  return note
 }

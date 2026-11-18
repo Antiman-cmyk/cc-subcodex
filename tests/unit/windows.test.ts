@@ -123,6 +123,10 @@ describe("Codex's sandbox on Windows", () => {
     expect(sandboxChoice(windowsOf(), '')).toEqual(MXC)
     expect(sandboxChoice(windowsOf(), 'model = "gpt-x"\nsandbox_mode = "workspace-write"\n\n[features]\nmulti_agent = true\n\n[windows_tools]\nsandbox = "x"')).toEqual(MXC)
     expect(sandboxChoice(windowsOf(), '# prefer_mxc = false\n[windows]\n# sandbox = "elevated"')).toEqual(MXC)
+    // A profile chooses only while it is the active one.
+    expect(sandboxChoice(windowsOf(), '[profiles.work.windows]\nsandbox = "elevated"')).toEqual(MXC)
+    expect(sandboxChoice(windowsOf(), 'profile = "home"\n[profiles.work.windows]\nsandbox = "elevated"')).toEqual(MXC)
+    expect(sandboxChoice(windowsOf(), 'notes = """\n{ sandbox = 1 }\n"""')).toEqual(MXC)
   })
 
   test('where the config chooses, it is left alone', () => {
@@ -135,6 +139,10 @@ describe("Codex's sandbox on Windows", () => {
       'windows.sandbox = "mxc"',
       'windows = { sandbox = "unelevated" }',
       '[projects]\nlist = [\n  ["a"],\n  ["b"],\n]\n\n[windows]\nsandbox = "elevated"',
+      'windows = {\n  allow_mxc = true,\n  sandbox = "elevated",\n}',
+      'profile = "work"\n[profiles.work.windows]\nsandbox = "elevated"',
+      "profile = 'work'\n[profiles.work]\nfeatures = { prefer_mxc = false }",
+      'profile = "my work"\n[profiles."my work"]\nwindows.sandbox = "unelevated"',
     ]) {
       expect(sandboxChoice(windowsOf(), config)).toEqual([])
     }

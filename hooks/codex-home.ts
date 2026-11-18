@@ -117,20 +117,41 @@ function statementsOf(toml: string): Statement[] {
   return all
 }
 
-/** The model and effort a Codex config sets before its first header, and whether it sets an approval policy there. */
+/** The values a TOML text sets, by name with their table (`table.key`), as written on the key's line; the first of each. */
+function valuesOf(toml: string): Map<string, string> {
+  const values = new Map<string, string>()
+  for (const { table, key, value } of statementsOf(toml)) {
+    const name = key === undefined ? undefined : table === '' ? key : `${table}.${key}`
+    if (name !== undefined && !values.has(name)) values.set(name, value)
+  }
+  return values
+}
+
+/** The table of a Codex config's active profile (`profile`), as `profiles.<name>.`; undefined without one. */
+function profileOf(values: Map<string, string>): string | undefined {
+  const profile = textOf(values.get('profile'))
+  return profile === undefined ? undefined : `profiles.${bare(profile)}.`
+}
+
+/** A string value written on one line, without its quotes; undefined for any other value. */
+function textOf(value: string | undefined): string | undefined {
+  const found = /^(?:"([^"]+)"|'([^']+)')/.exec(value ?? '')
+  return found?.[1] ?? found?.[2]
+}
+
+/**
+ * The model and effort a Codex config sets, and whether it sets an approval
+ * policy: each as its active profile sets it, else as set before its first
+ * header.
+ */
 export function defaultsOf(config: string): { defaults: Settings; hasApprovalPolicy: boolean } {
-  const top = new Map<string, string>()
-  for (const { table, key, value } of statementsOf(config)) {
-    if (table === '' && key !== undefined && !top.has(key)) top.set(key, value)
-  }
-  /** A string value on one line, without its quotes. */
-  const text = (key: string): string | undefined => {
-    const found = /^(?:"([^"]+)"|'([^']+)')/.exec(top.get(key) ?? '')
-    return found?.[1] ?? found?.[2]
-  }
+  const values = valuesOf(config)
+  const profile = profileOf(values)
+  const setting = (name: string): string | undefined =>
+    (profile === undefined ? undefined : values.get(`${profile}${name}`)) ?? values.get(name)
   return {
-    defaults: { model: text('model'), effort: text('model_reasoning_effort') },
-    hasApprovalPolicy: top.has('approval_policy'),
+    defaults: { model: textOf(setting('model')), effort: textOf(setting('model_reasoning_effort')) },
+    hasApprovalPolicy: setting('approval_policy') !== undefined,
   }
 }
 
@@ -149,13 +170,18 @@ export function ownConfig(text: string): string {
     .join('\n')
 }
 
-/** The keys a TOML text sets, each with the table it is in (`table.key`, dotted keys joined); values that span lines are skipped. */
+/**
+ * The keys a TOML text sets, each with the table it is in (`table.key`, dotted
+ * keys joined), and those of an inline table on one line or several; no other
+ * value is read for keys.
+ */
 export function keysOf(toml: string): string[] {
-  return statementsOf(toml).flatMap(({ table, key, value }) => {
+  return statementsOf(toml).flatMap(({ lines, table, key, value }) => {
     if (key === undefined) return []
     const name = table === '' ? key : `${table}.${key}`
     // An inline table: `windows = { sandbox = "mxc" }`.
-    const inner = (value.match(/[{,]\s*([A-Za-z0-9_-]+)\s*=/g) ?? []).map(found => `${name}.${bare(found.replace(/^[{,]|=$/g, ''))}`)
+    const inline = value.startsWith('{') ? [value, ...lines.slice(1)].join('\n') : ''
+    const inner = (inline.match(/[{,]\s*([A-Za-z0-9_-]+)\s*=/g) ?? []).map(found => `${name}.${bare(found.replace(/^[{,]|=$/g, ''))}`)
     return [name, ...inner]
   })
 }
@@ -163,13 +189,15 @@ export function keysOf(toml: string): string[] {
 /**
  * What Codex's server is also started with: on Windows, where the person's
  * Codex config chooses neither `features.prefer_mxc` nor `windows.sandbox`,
- * Codex prefers its MXC sandbox, and says nothing of the feature being under
- * development.
+ * at its top or in its active profile (`profile`), Codex prefers its MXC
+ * sandbox, and says nothing of the feature being under development.
  */
 export function sandboxChoice($: EngineInterface, config: string): string[] {
   if (!isWindows($)) return []
   const keys = keysOf(config)
-  if (keys.includes('features.prefer_mxc') || keys.includes('windows.sandbox')) return []
+  const profile = profileOf(valuesOf(config))
+  const scopes = profile === undefined ? [''] : ['', profile]
+  if (scopes.some(scope => keys.includes(`${scope}features.prefer_mxc`) || keys.includes(`${scope}windows.sandbox`))) return []
   return ['-c', 'features.prefer_mxc=true', '-c', 'suppress_unstable_features_warning=true']
 }
 
