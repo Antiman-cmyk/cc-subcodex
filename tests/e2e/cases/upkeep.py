@@ -73,7 +73,12 @@ def upkeep_default(c: Case):
     gone_today = _gone(c, today)
     theirs = f'{c.home}/.codex/sessions/{today}/rollout-{today.replace("/", "-")}T00-00-00-theirs.jsonl'
     os.symlink(f'{c.home}/elsewhere/rollout-theirs.jsonl', theirs)
+    # A folder of the person's Codex home that the mod links into its own, with a file in it.
+    packages = f'{c.home}/.codex/packages'
+    os.makedirs(packages, exist_ok=True)
+    open(f'{packages}/kept.txt', 'w').write('kept\n')
     claude(c, [codex_task('Count the lines of notes.txt.')], [[run(LINES)], answer('notes.txt has 3 lines.')])
+    c.check(os.path.islink(f'{c.home}/.claude/subcodex/codex-home/packages'), "the person's `packages` folder is linked into the mod's Codex home")
     c.check(not os.path.exists(f'{stale}.fifo') and not os.path.exists(f'{stale}.pid'),
             "a server's start removed the pipe and pid file of a server no longer running")
     c.check(not os.path.lexists(gone_today), "in the day folder of the agent's session, the mod's link whose session file is gone was removed")
@@ -117,6 +122,7 @@ def upkeep_default(c: Case):
     cleaned = claude(c, [], prompt='/subcodex clean all').result
     c.check('Removed 1 session files' in cleaned and '1 agent records' in cleaned, f'a pipe whose server is gone does not stop `clean all` ({cleaned[:160]!r})')
     c.check(not os.path.exists(f'{c.home}/.claude/subcodex'), "the mod's folder is gone")
+    c.check(os.path.exists(f'{packages}/kept.txt'), "the folders linked into it were not followed: the person's own `packages` keeps its file")
     c.check(not usage_links(c) and os.path.lexists(theirs),
             "every link of the mod's is gone, and only those")
     after = claude(c, [], prompt='/subcodex').result
