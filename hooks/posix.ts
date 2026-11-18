@@ -100,7 +100,10 @@ const UNLINK = `unlink_each() {
   done
 }`
 
-/** Removes session files older than $3 days and links whose file is gone; prints the count. */
+/**
+ * Removes session files older than $3 days and links whose file is gone;
+ * prints the count, then the session files left, one per line.
+ */
 const PRUNE = `${UNLINK}
 home="$0/codex-home"
 find "$home/sessions" "$home/archived_sessions" -type f -name 'rollout-*.jsonl*' -mmin +"$(( $3 * 1440 ))" -print -delete 2>/dev/null | wc -l | tr -d ' '
@@ -108,6 +111,7 @@ find "$1/sessions" "$1/archived_sessions" -type l -name "rollout-*$2.jsonl*" 2>/
   [ -e "$link" ] || echo "$link"
 done | unlink_each
 find "$home/sessions" -mindepth 1 -type d -empty -delete 2>/dev/null
+find "$home/sessions" "$home/archived_sessions" -type f -name 'rollout-*.jsonl*' 2>/dev/null
 exit 0`
 
 /** Removes every link and the mod's folder (only a path ending in `DATA_DIR`). */
@@ -115,9 +119,6 @@ const WIPE = `${UNLINK}
 case "$0" in */${DATA_DIR}) ;; *) exit 1 ;; esac
 find "$1/sessions" "$1/archived_sessions" -type l -name "rollout-*$2.jsonl*" 2>/dev/null | unlink_each
 rm -rf "$0"`
-
-/** Lists the session files left, one per line. */
-const LEFT = `find "$0/codex-home/sessions" "$0/codex-home/archived_sessions" -type f -name 'rollout-*.jsonl*' 2>/dev/null; exit 0`
 
 /** A script run by `/bin/sh`, its arguments `$0` onward. */
 const sh = (script: string) => (args: readonly string[]) => ({ argv: ['/bin/sh', '-c', script, ...args] })
@@ -131,7 +132,6 @@ export const POSIX: Host = {
   look: sh(LOOK),
   prune: sh(PRUNE),
   wipe: sh(WIPE),
-  left: sh(LEFT),
   remove: paths => ({ argv: ['/bin/rm', '-f', ...paths] }),
   sleep: ([seconds = '1']) => ({ argv: ['/bin/sleep', seconds] }),
   noop: () => ({ argv: ['/usr/bin/true'] }),

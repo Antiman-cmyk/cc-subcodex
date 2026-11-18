@@ -13,7 +13,7 @@ import re
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Callable
+from typing import Any
 
 from . import host
 
@@ -106,11 +106,6 @@ def answer(text: str) -> dict:
     return {'type': 'message', 'role': 'assistant', 'phase': 'final_answer', 'content': [{'type': 'output_text', 'text': text}]}
 
 
-def think(text: str) -> dict:
-    """A summary of Codex's reasoning."""
-    return {'type': 'reasoning', 'summary': [{'type': 'summary_text', 'text': text}], 'encrypted_content': ''}
-
-
 def search(query: str) -> dict:
     """A web search of Codex's own."""
     return {'type': 'web_search_call', 'status': 'completed', 'action': {'type': 'search', 'query': query}}
@@ -123,15 +118,6 @@ def outputs(body: dict) -> list[str]:
         if isinstance(item, dict) and item.get('type') in ('function_call_output', 'custom_tool_call_output'):
             output = item.get('output')
             found.append(output if isinstance(output, str) else json.dumps(output))
-    return found
-
-
-def said_to_codex(body: dict) -> list[str]:
-    """The user messages in Codex's input, oldest first."""
-    found = []
-    for item in body.get('input', []):
-        if isinstance(item, dict) and item.get('type') == 'message' and item.get('role') == 'user':
-            found.append(' '.join(part.get('text', '') for part in item.get('content', []) if isinstance(part, dict)))
     return found
 
 

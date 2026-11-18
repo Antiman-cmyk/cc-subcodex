@@ -277,7 +277,10 @@ $lines.Add("servers=$servers")
 Say (($lines -join [char]10) + [char]10)
 `
 
-/** Removes session files older than the age in days and links whose file is gone; prints the count. */
+/**
+ * Removes session files older than the age in days and links whose file is
+ * gone; prints the count, then the session files left, one per line.
+ */
 const PRUNE = String.raw`
 $data = Full $a[0]; $own = Full $a[1]; $mark = $a[2]; $modHome = "$data\codex-home"
 $cut = (Get-Date).AddMinutes(-1440 * [int]$a[3])
@@ -289,6 +292,7 @@ Say ("$count" + [char]10)
 foreach ($link in @(Links $own $mark)) { if (-not (Leads $link)) { Unlink $link.FullName } }
 $dirs = @(Walk "$modHome\sessions" | Where-Object { ($_ -is [IO.DirectoryInfo]) -and -not (IsLink $_) } | Sort-Object { $_.FullName.Length } -Descending)
 foreach ($dir in $dirs) { try { [IO.Directory]::Delete($dir.FullName) } catch {} }
+Say (@(Sessions $modHome | ForEach-Object { $_.FullName + [char]10 }) -join '')
 exit 0
 `
 
@@ -298,13 +302,6 @@ $data = Full $a[0]; $own = Full $a[1]; $mark = $a[2]
 if (-not $data.EndsWith(${literal(`\\${DATA_DIR.replace(/\//g, '\\')}`)}, [StringComparison]::OrdinalIgnoreCase)) { exit 1 }
 foreach ($link in @(Links $own $mark)) { Unlink $link.FullName }
 if ([IO.Directory]::Exists($data)) { [IO.Directory]::Delete($data, $true) }
-exit 0
-`
-
-/** Lists the session files left, one per line. */
-const LEFT = String.raw`
-$files = @(Sessions ((Full $a[0]) + '\codex-home') | ForEach-Object { $_.FullName + [char]10 })
-Say ($files -join '')
 exit 0
 `
 
@@ -353,7 +350,6 @@ export const WINDOWS: Host = {
   look: piped(LOOK),
   prune: piped(PRUNE),
   wipe: piped(WIPE),
-  left: piped(LEFT),
   remove: paths => ({ argv: pwsh(REMOVE), stdin: `${paths.join('\n')}\n` }),
   sleep: inline('Start-Sleep -Seconds ([int]$a[0])'),
   noop: inline('exit 0'),

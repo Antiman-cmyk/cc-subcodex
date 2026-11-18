@@ -4,7 +4,7 @@ import { REVIEW_CHANGES, merged, remember, untaken } from './agents'
 import { closeConn, isAbort, openConn, readMessage, request, send } from './app-server'
 import { CODEX_BRIEF, MESSAGE, RESULT, claudeName, toolsFor } from './bridge'
 import { claudeInstructions, findCodex, loginOf } from './codex-home'
-import { OWN_CODEX_HOME } from './config'
+import { LIVE_CHARS, OWN_CODEX_HOME } from './config'
 import { HOST_MISSING, codexSearch } from './host'
 import { fromServer, fromThread, inline, newSeen, type Item } from './events'
 import { NEARLY, limitKey, limitText } from './usage'
@@ -13,17 +13,20 @@ import { trace } from './log'
 import type { Agent, Conn, Ev, Rpc, Run } from './types'
 import { linkSessions } from './usage-links'
 
+/** A turn's run: its events, its answers to the server, and the maps its rows fill. */
+const runOf = (pull: Run['pull'], reply: Run['reply'], tools: Run['tools'] = new Map()): Run => ({
+  pull,
+  buffered: [],
+  tools,
+  edits: new Map(),
+  calls: new Map(),
+  reply,
+})
+
 /** A turn that could not begin: says why, and ends. */
 function failedRun(text: string): Run {
   const ready: Ev[] = [{ t: 'text', text }, { t: 'done' }]
-  return {
-    pull: async () => ready.shift() ?? { t: 'done' },
-    buffered: [],
-    tools: new Map(),
-    edits: new Map(),
-    calls: new Map(),
-    reply: async () => undefined,
-  }
+  return runOf(async () => ready.shift() ?? { t: 'done' }, async () => undefined)
 }
 
 /** The answer to a question Codex puts to the person. */
@@ -134,7 +137,7 @@ function codexRun(
     const rows = [...tools].filter(([, itemId]) => itemId === ev.id).map(([toolUseId]) => toolUseId)
     const text = `${early.get(ev.id) ?? ''}${ev.text}`
     if (rows.length === 0) {
-      early.set(ev.id, text.slice(-4_000))
+      early.set(ev.id, text.slice(-LIVE_CHARS))
       return
     }
     early.delete(ev.id)
@@ -438,7 +441,7 @@ function codexRun(
   const reply = (rpc: number | string, result: Record<string, unknown>): Promise<void> =>
     send($, conn, { id: rpc, result })
 
-  return { pull, buffered: [], tools, edits: new Map(), calls: new Map(), reply }
+  return runOf(pull, reply, tools)
 }
 
 /**
@@ -452,8 +455,8 @@ export async function steer(
   text: string,
 ): Promise<boolean> {
   const id = conn.nextId++
-  conn.steers.set(id, text)
   if (conn.threadId === undefined || conn.turnId === undefined || conn.hasEnded) return false
+  conn.steers.set(id, text)
   // The response is read by the turn's reader: there is one reader per server.
   await send($, conn, {
     id,

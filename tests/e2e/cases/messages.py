@@ -28,7 +28,6 @@ def message_default(c: Case):
     sends = s.calls('SendMessage')
     c.check(len(sends) == 1 and sends[0]['by'] == '<synthetic>' and not sends[0]['error'], 'the mod itself wrote the call that sent the message, and it went')
     c.check('halfway there' in str(sends[0]['input'].get('message') if sends else ''), "the message is Codex's own words")
-    c.check(not [r for r in s.rows if str(r.get('by', '')).startswith('claude-')], 'no Claude request was made inside the agent')
     c.check('Message: halfway there' in s.result, 'the main session received the message')
     only_synthetic_at_no_cost(c, s)
     c.check(any(LINES in str(call['input'].get('command')) for call in s.calls(COMMAND_ROW)), 'Codex went on working after sending it')

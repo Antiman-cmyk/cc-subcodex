@@ -112,9 +112,8 @@ const own = (args: Record<string, unknown>): Record<string, unknown> =>
 export function imagesOf(result: unknown): string[] {
   if (!Array.isArray(result)) return []
   return result.flatMap(block => {
-    const source = (block as { type?: string; source?: { type?: string; media_type?: string; data?: string; url?: string } }).type === 'image'
-      ? (block as { source?: { type?: string; media_type?: string; data?: string; url?: string } }).source
-      : undefined
+    const image = block as { type?: string; source?: { type?: string; media_type?: string; data?: string; url?: string } }
+    const source = image.type === 'image' ? image.source : undefined
     if (source?.type === 'base64' && source.data !== undefined) return [`data:${source.media_type ?? 'image/png'};base64,${source.data}`]
     if (source?.type === 'url' && source.url !== undefined) return [source.url]
     return []

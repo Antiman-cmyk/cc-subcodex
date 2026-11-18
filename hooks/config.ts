@@ -48,6 +48,8 @@ export const USAGE_MARK = '.subcodex'
 /** How much of a command's output a transcript row shows: its start and its end. */
 export const ROW_OUTPUT_HEAD = 2_000
 export const ROW_OUTPUT_TAIL = 6_000
+/** How much of a running command's latest output is kept. */
+export const LIVE_CHARS = 4_000
 /** How much of an agent's latest rows its context keeps when compacted. */
 export const KEPT_CHARS = 60_000
 /** How much of a Claude tool's result Codex is given. */
