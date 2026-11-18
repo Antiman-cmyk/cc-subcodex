@@ -7,28 +7,21 @@ import json
 import os
 import random
 import re
-import threading
 import time
 
 from .. import host
-from ..harness import (COMMAND_ROW, CODEX, Case, case, claude, codex_task, codex_threads, only_synthetic_at_no_cost, running, until_running,
-                       usage_links, watch)
+from ..harness import (COMMAND_ROW, CODEX, Case, Watch, case, claude, codex_task, codex_threads, gone, only_synthetic_at_no_cost, running,
+                       until_running, usage_links)
 from ..mocks import agent_id, answer, call, latest, results, run, say, use
 
 FORGET = 'Forget the sleep. Reply with just the codeword from your task.'
 
 
-def _kill(seconds: float, command: str) -> dict:
-    """When a session is killed outright: so many seconds in, or on Windows once Codex has run `command` for 2 seconds."""
+def _kill(seconds: float, seen: Watch) -> dict:
+    """When a session is killed outright: so many seconds in, or on Windows 2 seconds after Codex's command was seen."""
     if not host.WINDOWS:
         return {'kill_after': seconds}
-    since = {}
-
-    def is_due() -> bool:
-        if 'at' not in since and running(command):
-            since['at'] = time.time()
-        return 'at' in since and time.time() - since['at'] >= 2
-    return {'kill_when': is_due}
+    return {'kill_when': lambda: seen.at is not None and time.time() - seen.at >= 2}
 
 
 def _recall(word: str):
@@ -79,15 +72,13 @@ def _stop() -> list:
 def stop_auto(c: Case):
     c.plain()
     seconds = 4000 + random.randrange(1000)
-    seen, stop = {'seen': False}, threading.Event()
-    threading.Thread(target=watch, args=(f'sleep {seconds}', seen, stop), daemon=True).start()
+    seen = Watch(f'sleep {seconds}')
     main = [codex_task(f'Run sleep {seconds} and then say done.', background=True), *_stop_steps(seconds), say('STOPPED')]
     s = claude(c, main, [[run(f'sleep {seconds}')], answer('done')], mode='auto')
-    stop.set()
-    c.check(seen['seen'], 'Codex really started the long command')
+    seen.stop()
+    c.check(seen.at is not None, 'Codex really started the long command')
     c.check(any(call['name'] == 'TaskStop' for call in s.main), 'the main session stopped the agent')
-    time.sleep(3)
-    c.check(not running(f'sleep {seconds}'), "after the stop, Codex's command is gone")
+    c.check(gone(f'sleep {seconds}', 3), "after the stop, Codex's command is gone")
     # Either the mod's interrupt or the engine's stop ends the server.
     c.check(re.search(r'Codex interrupted|(/bin/sh|pwsh\.exe) stopped: the op was aborted', s.log), "Codex's server was stopped with the agent")
 
@@ -96,13 +87,11 @@ def stop_auto(c: Case):
 def killed_session(c: Case):
     c.plain()
     seconds = 5000 + random.randrange(1000)
-    seen, stop = {'seen': False}, threading.Event()
-    threading.Thread(target=watch, args=(f'sleep {seconds}', seen, stop), daemon=True).start()
-    claude(c, [codex_task(f'Run sleep {seconds} and then say done.')], [[run(f'sleep {seconds}')], answer('done')], **_kill(15, f'sleep {seconds}'))
-    stop.set()
-    c.check(seen['seen'], 'Codex really started the long command')
-    time.sleep(8)
-    c.check(not running(f'sleep {seconds}'), "the session's process killed outright: Codex's command does not live on")
+    seen = Watch(f'sleep {seconds}')
+    claude(c, [codex_task(f'Run sleep {seconds} and then say done.')], [[run(f'sleep {seconds}')], answer('done')], **_kill(15, seen))
+    seen.stop()
+    c.check(seen.at is not None, 'Codex really started the long command')
+    c.check(gone(f'sleep {seconds}', 8), "the session's process killed outright: Codex's command does not live on")
     links = usage_links(c)
     c.check(links and all(os.path.exists(link) for link in links), f"the agent's Codex session was linked for usage tools as its turn began ({len(links)})")
 
@@ -138,13 +127,12 @@ def stop_then_continue(c: Case):
     c.plain()
     word = f'OTTER-{random.randrange(1000, 9999)}'
     seconds = 6000 + random.randrange(1000)
-    seen, stop = {'seen': False}, threading.Event()
-    threading.Thread(target=watch, args=(f'sleep {seconds}', seen, stop), daemon=True).start()
+    seen = Watch(f'sleep {seconds}')
     main = [codex_task(f'Remember the codeword {word}. Then run sleep {seconds} and then say done.', background=True),
             *_stop_steps(seconds), *_ask_again(FORGET)]
     s = claude(c, main, [[run(f'sleep {seconds}')], _recall(word)], mode='auto')
-    stop.set()
-    c.check(seen['seen'], 'Codex really started the long command before it was stopped')
+    seen.stop()
+    c.check(seen.at is not None, 'Codex really started the long command before it was stopped')
     c.check(any(call['name'] == 'TaskStop' for call in s.main), 'the main session stopped the agent')
     c.check(not running(f'sleep {seconds}'), "the stopped turn's command is gone")
     c.check(s.traced('Codex turn 2'), 'the message after the stop started a new Codex turn')
@@ -178,12 +166,11 @@ def killed_then_continue(c: Case):
     seconds = 7000 + random.randrange(1000)
     main = [codex_task(f'Remember the codeword {word}. Then run sleep {seconds} and then say done.', background=True),
             call('Bash', command='sleep 120', timeout=150000)]
-    seen, stop = {'seen': False}, threading.Event()
-    threading.Thread(target=watch, args=(f'sleep {seconds}', seen, stop), daemon=True).start()
-    first = claude(c, main, [[run(f'sleep {seconds}')]], mode='auto', **_kill(20, f'sleep {seconds}'))
-    stop.set()
+    seen = Watch(f'sleep {seconds}')
+    first = claude(c, main, [[run(f'sleep {seconds}')]], mode='auto', **_kill(20, seen))
+    seen.stop()
     c.check(first.id, 'the first session started')
-    c.check(seen['seen'], 'Codex really started the long command before the session was killed')
+    c.check(seen.at is not None, 'Codex really started the long command before the session was killed')
     time.sleep(5)
     c.check(not running(f'sleep {seconds}'), "killed outright mid-turn: Codex's command does not live on")
     second = claude(c, _ask_again(FORGET), [_recall(word)], mode='auto', resume=first.id)

@@ -88,14 +88,14 @@ def main() -> int:
     left = lambda: host.leftovers(SESSIONS, run_started, root)
 
     found = lambda: glob.glob(f'{root}/*.home/.claude/subcodex/run/*.fifo') + glob.glob(f'{root}/*.home/.claude/subcodex/run/*.pid')
-    for _ in range(10):  # a server told to stop takes a moment to go, and its pipe and pid file with it
-        if not left() and not found():
+    deadline = time.time() + 20  # a server told to stop takes a moment to go, and its pipe and pid file with it
+    while True:
+        still, pipes = left(), [os.path.relpath(path, root) for path in found()]
+        if not (still or pipes) or time.time() >= deadline:
             break
         time.sleep(2)
-    pipes = [os.path.relpath(path, root) for path in found()]
     after = Case('after_every_case', root)
     after.check(not pipes, f"no pipe or pid file of a Codex server is left behind ({len(pipes)} found{': ' + ', '.join(pipes[:3]) if pipes else ''})")
-    still = left()
     after.check(not still, f'no process of the run is still running ({still[:2]})')
     print(f'{"ok  " if all(ok for ok, _ in after.checks) else "FAIL"} after_every_case', flush=True)
     for ok, what in after.checks:

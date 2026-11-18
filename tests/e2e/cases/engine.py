@@ -133,7 +133,8 @@ def team_default(c: Case):
 @case
 def long_auto(c: Case):
     c.plain()
-    shards = 600
+    # The engine cuts its copy of the context after about 350 of these commands' rows.
+    shards = 450 if host.WINDOWS else 600
     page = sh("seq 1 400 | sed 's/^/row checked against baseline, drift within tolerance, status nominal, line /'",
               '1..400 | ForEach-Object { "row checked against baseline, drift within tolerance, status nominal, line $_" }')
     steps = [[run(f'echo shard {n}; {page}')] for n in range(shards)] + [answer(f'All {shards} shards scanned. Nothing drifted; the codeword for this run is HERON-42.')]
