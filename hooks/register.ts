@@ -42,6 +42,7 @@ import { callId, lastStep, mirror, toolStep } from './steps'
 import { promptFor, startTurn, steer } from './turn'
 import type { Agent, Ev, Relay, Run } from './types'
 import { COMMAND, keepLimits, upkeep } from './upkeep'
+import { commandTool, learnSystem } from './host'
 
 // Codex supplies every step. Native communication runs through a local
 // protocol response so the engine retains delivery, permissions and task state.
@@ -98,10 +99,14 @@ async function pullUntil(run: Run, signal: AbortSignal): Promise<Ev | undefined>
 export const register: Register = on => {
   registerModelMock(on)
   registerLive(on)
+  /** The tool of the rows that mirror Codex's commands (`commandTool`), set as the session starts. */
+  let commandRow: 'Bash' | 'PowerShell' = 'Bash'
   on('session.start', async ($, e, next) => {
+    await learnSystem($)
     const { defaults, models } = await findCodex($)
     const model = defaults.model ?? 'its own default model'
     const effort = defaults.effort ?? 'its own default effort'
+    commandRow = await commandTool($)
     // Written only by the mod; deferred to keep the main prompt small.
     await $.tool.register({
       name: 'checkpoint',
@@ -138,8 +143,8 @@ export const register: Register = on => {
         "For a review of code changes, and only of code, `@codex review` on that line runs Codex's own review mode, a fixed reviewer that answers with bugs in the change ranked by priority: the rest of the prompt says what to review, and with nothing more it reviews the uncommitted changes. It starts without this conversation, so say there what matters. To have anything else checked (a paper, prose, data, results), give an ordinary task that says what to check and by what standard, without `review`. " +
         'The agent can be sent a later message: Codex goes on in the same thread.',
       prompt: 'OpenAI Codex performs this task. The subcodex mod supplies its steps and native tool calls locally. No Claude model is needed.',
-      // Bash, Edit and Write rows mirror Codex's commands and edits; any other call of them is refused.
-      tools: ['Bash', 'Edit', 'Write', CHECKPOINT, CLAUDE_TOOL, 'SendMessage', 'StructuredOutput'],
+      // Command, Edit and Write rows mirror Codex's commands and edits; any other call of them is refused.
+      tools: [commandRow, 'Edit', 'Write', CHECKPOINT, CLAUDE_TOOL, 'SendMessage', 'StructuredOutput'],
       model: SYNTHETIC,
       omitClaudeMd: true,
     })
@@ -300,7 +305,7 @@ export const register: Register = on => {
         await settle($, agent, relay, false, (await lastError($, agentId)) ?? 'the native tool call did not complete')
       }
 
-      const shown = yield* mirror(e, short, run)
+      const shown = yield* mirror(e, short, run, commandRow)
       if (!('ended' in shown)) return shown
 
       // The Codex turn is over.
@@ -511,56 +516,69 @@ export const register: Register = on => {
     next.called || e.agentId === undefined || !agents.has(e.agentId) ? next(e) : { deny: 'subcodex: mirroring this edit failed.' },
   )
 
-  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const id = e.agentId
-    if (id === undefined) return next(e)
-    const agent = agents.get(id)
-    if (agent === undefined && (await typeOf($, id)) !== TYPE) return next(e)
-    const run = agent?.run
-    const itemId = run?.tools.get(e.tool_use_id)
-    if (run === undefined || itemId === undefined) {
-      return { deny: 'subcodex: this call mirrors no Codex command.' }
-    }
-    // The row keeps its command until the end, for the output drawn under it while it runs.
-    const ended = async <T>(answer: T): Promise<T> => {
-      run.tools.delete(e.tool_use_id)
-      await dropOutput($, e.tool_use_id).catch(() => undefined)
-      return answer
-    }
-    const outputOf = (ev: Extract<Ev, { t: 'cmd_done' }>) => ({
-      result: {
-        stdout:
-          ev.output.length > ROW_OUTPUT_HEAD + ROW_OUTPUT_TAIL
-            ? `${ev.output.slice(0, ROW_OUTPUT_HEAD)}\n[... ${ev.output.length - ROW_OUTPUT_HEAD - ROW_OUTPUT_TAIL} characters left out here, which Codex has ...]\n${ev.output.slice(-ROW_OUTPUT_TAIL)}`
-            : ev.output,
-        stderr: ev.exitCode !== null && ev.exitCode !== 0 ? `Exit code ${ev.exitCode}` : '',
-        interrupted: false,
-      },
-    })
-    // Commands run side by side: the end may already have been read.
-    const at = run.buffered.findIndex(ev => ev.t === 'cmd_done' && ev.id === itemId)
-    const kept = at < 0 ? undefined : run.buffered.splice(at, 1)[0]
-    if (kept?.t === 'cmd_done') return ended(outputOf(kept))
-    for (;;) {
-      const ev = await pullUntil(run, next.signal)
-      // The agent was stopped: its turn's end closes Codex.
-      if (ev === undefined) return ended({ result: { stdout: '', stderr: 'Stopped.', interrupted: true } })
-      if (ev.t === 'cmd_done' && ev.id === itemId) return ended(outputOf(ev))
-      run.buffered.push(ev)
-      if (ev.t === 'done') {
-        return ended({
-          result: {
-            stdout: '',
-            stderr: 'Codex ended before this command reported its output.',
-            interrupted: true,
-          },
-        })
-      }
-    }
-  }).catch((_$, e, next) =>
+  // Command rows (`commandRow`) show commands Codex has run: the tools never run.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => (await commandAnswer($, e, next.signal)) ?? next(e)).catch((_$, e, next) =>
     // A failed hook must not let a mirrored command run for real.
     next.called || e.agentId === undefined || !agents.has(e.agentId)
       ? next(e)
       : { deny: 'subcodex: mirroring this command failed.' },
   )
+  on('tool.call', { tool: 'PowerShell' }, async ($, e, next) => (await commandAnswer($, e, next.signal)) ?? next(e)).catch((_$, e, next) =>
+    next.called || e.agentId === undefined || !agents.has(e.agentId)
+      ? next(e)
+      : { deny: 'subcodex: mirroring this command failed.' },
+  )
+}
+
+/**
+ * The answer to a command row: the output of the command Codex ran, never a
+ * run of the tool; undefined for a call outside a Codex agent.
+ */
+async function commandAnswer(
+  $: EngineInterface,
+  e: { agentId?: string; tool_use_id: string },
+  signal: AbortSignal,
+): Promise<{ deny: string } | { result: { stdout: string; stderr: string; interrupted: boolean } } | undefined> {
+  if (!(await isInCodex($, e.agentId))) return undefined
+  const run = agents.get(String(e.agentId))?.run
+  const itemId = run?.tools.get(e.tool_use_id)
+  if (run === undefined || itemId === undefined) {
+    return { deny: 'subcodex: this call mirrors no Codex command.' }
+  }
+  // The row keeps its command until the end, for the output drawn under it while it runs.
+  const ended = async <T>(answer: T): Promise<T> => {
+    run.tools.delete(e.tool_use_id)
+    await dropOutput($, e.tool_use_id).catch(() => undefined)
+    return answer
+  }
+  const outputOf = (ev: Extract<Ev, { t: 'cmd_done' }>) => ({
+    result: {
+      stdout:
+        ev.output.length > ROW_OUTPUT_HEAD + ROW_OUTPUT_TAIL
+          ? `${ev.output.slice(0, ROW_OUTPUT_HEAD)}\n[... ${ev.output.length - ROW_OUTPUT_HEAD - ROW_OUTPUT_TAIL} characters left out here, which Codex has ...]\n${ev.output.slice(-ROW_OUTPUT_TAIL)}`
+          : ev.output,
+      stderr: ev.exitCode !== null && ev.exitCode !== 0 ? `Exit code ${ev.exitCode}` : '',
+      interrupted: false,
+    },
+  })
+  // Commands run side by side: the end may already have been read.
+  const at = run.buffered.findIndex(ev => ev.t === 'cmd_done' && ev.id === itemId)
+  const kept = at < 0 ? undefined : run.buffered.splice(at, 1)[0]
+  if (kept?.t === 'cmd_done') return ended(outputOf(kept))
+  for (;;) {
+    const ev = await pullUntil(run, signal)
+    // The agent was stopped: its turn's end closes Codex.
+    if (ev === undefined) return ended({ result: { stdout: '', stderr: 'Stopped.', interrupted: true } })
+    if (ev.t === 'cmd_done' && ev.id === itemId) return ended(outputOf(ev))
+    run.buffered.push(ev)
+    if (ev.t === 'done') {
+      return ended({
+        result: {
+          stdout: '',
+          stderr: 'Codex ended before this command reported its output.',
+          interrupted: true,
+        },
+      })
+    }
+  }
 }

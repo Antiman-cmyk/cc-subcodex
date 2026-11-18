@@ -26,11 +26,14 @@ test('a running command shows its latest output under its row, on every surface'
   })
   // Stands for the session's state: the output kept so far.
   on('state.get', () => ({ value: { value: { [ID]: 'compiling a\ncompiling b\n' }, version: 1 } }))
-  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
-    const ui = await $.ui.mount({ ...rowOf('Bash', true), surface })
-    expect((await ui.find({ type: 'Text', text: /Bash\(make\)/ }))?.text).toBe('Bash(make)')
-    expect((await ui.find({ type: 'Text', text: /compiling b/ }))?.text).toBe('compiling a\ncompiling b')
-    await ui.unmount()
+  // A Bash row, or a PowerShell row as on Windows.
+  for (const tool of ['Bash', 'PowerShell']) {
+    for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+      const ui = await $.ui.mount({ ...rowOf(tool, true), surface })
+      expect((await ui.find({ type: 'Text', text: /Bash\(make\)/ }))?.text).toBe('Bash(make)')
+      expect((await ui.find({ type: 'Text', text: /compiling b/ }))?.text).toBe('compiling a\ncompiling b')
+      await ui.unmount()
+    }
   }
 })
 

@@ -5,11 +5,13 @@ import { closeConn, isAbort, openConn, readMessage, request, send } from './app-
 import { CODEX_BRIEF, MESSAGE, RESULT, claudeName, toolsFor } from './bridge'
 import { claudeInstructions, findCodex, loginOf } from './codex-home'
 import { OWN_CODEX_HOME } from './config'
+import { HOST_MISSING, codexSearch } from './host'
 import { fromServer, fromThread, inline, newSeen, type Item } from './events'
 import { NEARLY, limitKey, limitText } from './usage'
 import { addOutput } from './live'
 import { trace } from './log'
 import type { Agent, Conn, Ev, Rpc, Run } from './types'
+import { linkSessions } from './usage-links'
 
 /** A turn that could not begin: says why, and ends. */
 function failedRun(text: string): Run {
@@ -123,7 +125,7 @@ function codexRun(
   isReview: boolean,
 ): Run {
   const ready: Ev[] = []
-  /** tool_use_id of a mirrored Bash row -> the Codex command it mirrors. */
+  /** tool_use_id of a mirrored command row -> the Codex command it mirrors. */
   const tools = new Map<string, string>()
   /** Output of commands whose row is not written yet, by Codex item. */
   const early = new Map<string, string>()
@@ -149,15 +151,19 @@ function codexRun(
   }
 
   const begin = async (): Promise<void> => {
-    const { bin, home, hasApprovalPolicy } = await findCodex($)
+    const { bin, home, hasApprovalPolicy, isHostMissing } = await findCodex($)
     const { model, effort } = agent.settings
     if (conn.isStopped) {
       hasEnded = true
       return
     }
+    if (!conn.isUp && isHostMissing) {
+      fail(`Codex did not start. ${HOST_MISSING}`)
+      return
+    }
     if (!conn.isUp) {
       fail(
-        `Codex did not start. The subcodex mod runs \`${bin} app-server\`, and that server gave no answer: check that the Codex CLI is installed, on your login shell's PATH, and recent enough to have \`app-server\`.`,
+        `Codex did not start. The subcodex mod runs \`${bin} app-server\`, and that server gave no answer: check that the Codex CLI is installed, on ${codexSearch($).where}, and recent enough to have \`app-server\`.`,
       )
       return
     }
@@ -232,6 +238,8 @@ function codexRun(
       return
     }
     conn.turnId = begun.result?.turn?.id as string | undefined
+    // The thread's session file exists from here: it is linked for usage tools.
+    void linkSessions($, conn.home)
   }
 
   /** The sub-agent a thread other than the agent's own belongs to. */

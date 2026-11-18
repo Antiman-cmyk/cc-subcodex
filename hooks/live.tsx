@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 // The output of Codex's commands while they run, drawn under each running
-// Bash row of a Codex agent; the row's result shows the whole output once the
-// command ends.
+// command row (Bash or PowerShell) of a Codex agent; the row's result shows
+// the whole output once the command ends.
 
 /** The latest output of each running mirrored command, by its row's tool_use_id. */
 const live = atom({ plugin: 'subcodex', key: 'live' } as const, {})
@@ -39,7 +39,7 @@ export function lastLines(text: string): string[] {
 
 export function registerLive(on: Parameters<Register>[0]): void {
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
-    if (e.props.tool !== 'Bash' || !e.props.isRunning) return next(e)
+    if ((e.props.tool !== 'Bash' && e.props.tool !== 'PowerShell') || !e.props.isRunning) return next(e)
     const output = (await read($, live))[e.props.tool_use_id]
     const lines = output === undefined ? [] : lastLines(output)
     if (lines.length === 0) return next(e)

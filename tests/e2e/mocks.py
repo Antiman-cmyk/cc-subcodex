@@ -15,6 +15,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 
+from . import host
+
 # --- what the main Claude session says ---------------------------------------------------------------
 
 def call(name: str, **args: Any) -> dict:
@@ -63,6 +65,20 @@ def agent_id(body: dict) -> str:
 
 
 # --- what Codex's model says ---------------------------------------------------------------------------
+
+def sh(posix: str, windows: str) -> str:
+    """A command for Codex's shell: as written for a POSIX shell, or on Windows for PowerShell."""
+    return windows if host.WINDOWS else posix
+
+
+# Commands the cases have Codex run.
+LINES = sh('wc -l notes.txt', '(Get-Content notes.txt).Count')
+
+
+def touch(path: str) -> str:
+    """A command that creates an empty file."""
+    return sh(f'touch {path}', f"New-Item -ItemType File -Path '{path}'")
+
 
 def run(command: str, escalate: str = '') -> dict:
     """Codex runs a shell command; with `escalate` (the reason), it asks to run it outside its sandbox."""

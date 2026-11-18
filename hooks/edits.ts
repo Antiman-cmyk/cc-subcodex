@@ -1,4 +1,5 @@
 import type { Ev } from './types'
+import { isAbsolute } from './host'
 
 // Codex's file edits as the native Edit and Write rows: their input and the
 // result the row shows, from Codex's own diff. The tools never run.
@@ -33,7 +34,7 @@ export function hunksOf(diff: string): Hunk[] {
 
 /** Whether a change of Codex's can be an edit row: an update of hunks in place, or a new file. */
 export function isEditable(change: { path?: string; kind?: { type?: string; move_path?: string | null }; diff?: string }): boolean {
-  if (change.path?.startsWith('/') !== true) return false
+  if (change.path === undefined || !isAbsolute(change.path)) return false
   if (change.kind?.type === 'add') return true
   return change.kind?.type === 'update' && (change.kind.move_path ?? null) === null && hunksOf(change.diff ?? '').length > 0
 }

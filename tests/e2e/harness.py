@@ -11,11 +11,11 @@ import os
 import random
 import re
 import shutil
-import signal
 import subprocess
 import threading
 import time
 
+from . import host
 from .mocks import Mocks, call
 
 MOD = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,6 +30,14 @@ PERSON_CODEX = os.environ.get('CODEX_HOME') or os.path.expanduser('~/.codex')
 LIVE_HOSTS = ('chatgpt.com', 'openai.com')
 TOKENS = ('input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')
 RUN = f'{random.randrange(16**6):06x}'
+# The sessions this run started, by process id: every process of the run descends from one of them.
+SESSIONS: set[int] = set()
+# The tool of the rows that mirror Codex's commands: on Windows sessions have the PowerShell tool turned on.
+COMMAND_ROW = 'PowerShell' if host.WINDOWS else 'Bash'
+# What a Windows process needs of the environment, passed to each session as it is.
+WINDOWS_ENV = ('SystemRoot', 'SystemDrive', 'windir', 'ComSpec', 'PATHEXT', 'OS', 'PROCESSOR_ARCHITECTURE', 'NUMBER_OF_PROCESSORS',
+               'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432', 'CommonProgramFiles', 'CommonProgramW6432',
+               'PSModulePath', 'USERNAME', 'COMPUTERNAME', 'TEMP', 'TMP')
 
 
 # ---------------------------------------------------------------- one session
@@ -131,12 +139,13 @@ def _text(content) -> str:
 
 
 def claude(c: 'Case', main: list, codex=None, mode: str = 'default', extra: tuple = (), resume: str | None = None,
-           timeout: int = 300, kill_after: float | None = None, config: str = '', reviewer: str = 'allow',
-           live: bool = False, prompt: str = 'Go.') -> Session:
+           timeout: int = 300, kill_after: float | None = None, kill_when=None, config: str = '', reviewer: str = 'allow',
+           live: bool = False, prompt: str = 'Go.', env: dict | None = None) -> Session:
     """One headless session in the case's folder and home, its model requests answered by `main`, Codex's by
     `codex` (mocks.py), and Codex's reviewer's with `reviewer`. `config` is more of the home's Codex config.
     `live`: Codex's requests go to OpenAI instead, on the person's own Codex login (live cases only).
-    `prompt` is what the session is given, such as a slash command."""
+    `prompt` is what the session is given, such as a slash command. The session's process is killed alone
+    `kill_after` seconds in, or once `kill_when()` is true. `env` is set over the session's environment."""
     os.makedirs(c.folder, exist_ok=True)
     os.makedirs(f'{c.home}/.codex', exist_ok=True)
     os.makedirs(f'{c.home}/.claude', exist_ok=True)
@@ -152,29 +161,44 @@ def claude(c: 'Case', main: list, codex=None, mode: str = 'default', extra: tupl
             open(f'{c.home}/.codex/config.toml', 'w').write(
                 f'model = "{CODEX}"\nmodel_provider = "mock"\nsandbox_mode = "workspace-write"\n{config}\n\n{sandbox}'
                 f'[model_providers.mock]\nname = "Mock"\nbase_url = "{mocks.openai}/v1"\nwire_api = "responses"\nenv_key = "MOCK_OPENAI_KEY"\n')
-        env = {'PATH': os.environ.get('PATH', ''), 'SHELL': os.environ.get('SHELL', '/bin/zsh'), 'TERM': 'dumb',
-               'TMPDIR': os.environ.get('TMPDIR', '/tmp'), 'LANG': os.environ.get('LANG', 'en_US.UTF-8'),
+        more_env = env or {}
+        env = {'PATH': os.environ.get('PATH', ''), 'TERM': 'dumb', 'LANG': os.environ.get('LANG', 'en_US.UTF-8'),
                'HOME': c.home, 'CLAUDE_CONFIG_DIR': f'{c.home}/.claude',
                'ANTHROPIC_BASE_URL': mocks.anthropic, 'ANTHROPIC_API_KEY': 'sk-ant-offline-test', 'MOCK_OPENAI_KEY': 'offline-test',
                'DISABLE_TELEMETRY': '1', 'DISABLE_AUTOUPDATER': '1', 'DISABLE_ERROR_REPORTING': '1'}
+        if host.WINDOWS:
+            env.update({name: os.environ[name] for name in WINDOWS_ENV if name in os.environ})
+            # LOCALAPPDATA stays the person's: there PowerShell 7 from the Microsoft Store is found by name.
+            env.update({name: os.environ[name] for name in ('LOCALAPPDATA',) if name in os.environ})
+            env.update({'USERPROFILE': c.home, 'APPDATA': f'{c.home}/AppData/Roaming', 'CLAUDE_CODE_USE_POWERSHELL_TOOL': '1'})
+        else:
+            env.update({'SHELL': os.environ.get('SHELL', '/bin/zsh'), 'TMPDIR': os.environ.get('TMPDIR', '/tmp')})
+        env.update(more_env)
         cmd = [CLAUDE, '-p', prompt, '--plugin-dir', MOD, '--plugin-dir', FIXTURE, '--model', 'claude-haiku-5-5', '--permission-mode', mode,
                '--output-format', 'stream-json', '--verbose', '--debug-file', os.path.join(c.folder, 'debug.log'),
                *(['--resume', resume] if resume else []), *extra]
         with open(os.path.join(c.folder, 'out.jsonl'), 'w') as out, open(os.path.join(c.folder, 'err.txt'), 'w') as err:
-            proc = subprocess.Popen(cmd, cwd=c.folder, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True)
+            proc = subprocess.Popen(cmd, cwd=c.folder, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err, **host.popen_options())
+            SESSIONS.add(proc.pid)
+            if kill_when:
+                deadline = time.time() + timeout
+                while proc.poll() is None and time.time() < deadline and not kill_when():
+                    time.sleep(0.5)
+                if proc.poll() is None:
+                    # Killed alone, as a crash would: its children are not signalled; at the deadline, stopped whole.
+                    proc.kill() if time.time() < deadline else host.stop_tree(proc.pid)
             try:
                 proc.wait(timeout=kill_after if kill_after else timeout)
             except subprocess.TimeoutExpired:
                 if kill_after:
-                    # Kill the session's process alone, as a crash would; its children are not signalled.
-                    os.kill(proc.pid, signal.SIGKILL)
+                    proc.kill()
                 else:
-                    os.killpg(proc.pid, signal.SIGTERM)
+                    host.stop_tree(proc.pid)
                 proc.wait()
         s = Session(c.folder, c.home, proc.returncode)
         s.mocks = mocks
-    hosts = sorted({host for host in re.findall(r'https?://([A-Za-z0-9.-]+)', s.log) if host not in ('127.0.0.1', 'localhost')
-                    and not (live and any(host == one or host.endswith(f'.{one}') for one in LIVE_HOSTS))})
+    hosts = sorted({name for name in re.findall(r'https?://([A-Za-z0-9.-]+)', s.log) if name not in ('127.0.0.1', 'localhost')
+                    and not (live and any(name == one or name.endswith(f'.{one}') for one in LIVE_HOSTS))})
     c.check(not hosts, f'no request left the machine{", but to OpenAI" if live else ""} ({hosts[:3]})')
     return s
 
@@ -313,14 +337,15 @@ def only_synthetic_at_no_cost(c: Case, s: Session, rows=None) -> None:
 def codex_threads(c: 'Case') -> list[dict]:
     """The Codex sessions recorded for the case: their first line, the tools the mod gave them, and their turn settings."""
     found = []
-    real = os.path.realpath(c.folder)
+    same = lambda path: os.path.normcase(os.path.realpath(path))
+    real = same(c.folder)
     for path in glob.glob(f'{c.home}/.claude/subcodex/codex-home/sessions/*/*/*/rollout-*.jsonl'):
         lines = open(path, errors='ignore').read().split('\n')
         try:
             meta = json.loads(lines[0])['payload']
         except Exception:
             continue
-        if os.path.realpath(str(meta.get('cwd'))) != real:
+        if same(str(meta.get('cwd'))) != real:
             continue
         turns = []
         for line in lines[1:]:
@@ -336,14 +361,13 @@ def codex_threads(c: 'Case') -> list[dict]:
     return found
 
 
-def running(command: str) -> bool:
-    """Whether a process's command line starts with `command`."""
-    return bool(subprocess.run(['pgrep', '-f', f'^{command}'], capture_output=True).stdout.strip())
+def usage_links(c: 'Case') -> list[str]:
+    """The links of the mod's in the case's own Codex home, by which usage tools count its sessions."""
+    return glob.glob(f'{c.home}/.codex/sessions/*/*/*/rollout-*.subcodex.jsonl')
 
 
-def until_running(command: str) -> str:
-    """A Bash command for the driver that waits until a process runs `command`."""
-    return f"until pgrep -f '^{command}' >/dev/null; do sleep 2; done"
+running = host.running
+until_running = host.until_running
 
 
 def watch(command: str, seen: dict, stop: threading.Event):

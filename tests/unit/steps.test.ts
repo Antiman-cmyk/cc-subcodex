@@ -8,9 +8,9 @@ import type { Ev, Run } from '../../hooks/types'
 
 const STEP = { turnId: 'turn-abcdefgh', index: 0, model: '<synthetic>', messageCount: 1, agentId: 'agent-1' } as TurnStepInput
 const runOf = (events: Ev[]): Run => ({ pull: async () => events.shift() ?? { t: 'done' }, buffered: [], tools: new Map(), edits: new Map(), calls: new Map(), reply: async () => undefined })
-async function step(run: Run) {
+async function step(run: Run, commandTool: 'Bash' | 'PowerShell' = 'Bash') {
   const chunks: TurnStepChunk[] = []
-  const walk = mirror(STEP, 'abc123', run)
+  const walk = mirror(STEP, 'abc123', run, commandTool)
   for (;;) {
     const next = await walk.next()
     if (next.done === true) return { chunks, result: next.value }
@@ -31,6 +31,11 @@ describe('a step written from what Codex does', () => {
     expect([...run.tools.values()]).toEqual(['exec-1'])
     // A step the mod wrote costs no Claude tokens, and says so.
     expect(result.usage).toEqual({ model: '<synthetic>', input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 })
+  })
+
+  test('on Windows, where the session has PowerShell, the command is a PowerShell call', async () => {
+    const { result } = await step(runOf([{ t: 'cmd', id: 'exec-1', command: 'Get-Content notes.txt' }]), 'PowerShell')
+    expect('ended' in result ? [] : result.toolUses).toEqual([{ name: 'PowerShell', input: { command: 'Get-Content notes.txt', description: 'Run by Codex' } }])
   })
 
   test("the closing message is the one Codex marked final: not what it said along the way, a sub-agent's words, or a line of the mod's", async () => {

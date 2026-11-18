@@ -72,12 +72,13 @@ export type Ended = { ended: true; block: number; answer: string; own: string }
 /**
  * Writes one step of the agent's transcript from Codex's events, up to the
  * first tool call (a command, an edit, a tool of the session's). Returns that step, or
- * `Ended` where Codex's turn ended first.
+ * `Ended` where Codex's turn ended first. A command is a row of `commandTool`.
  */
 export async function* mirror(
   e: TurnStepInput,
   short: string,
   run: Run,
+  commandTool: 'Bash' | 'PowerShell' = 'Bash',
 ): AsyncGenerator<TurnStepChunk, TurnStepResult | Ended> {
   let block = 0
   let open: 'text' | 'thinking' | undefined
@@ -131,7 +132,7 @@ export async function* mirror(
         description: ev.by === undefined ? 'Run by Codex' : `Run by Codex sub-agent ${ev.by}`,
       }
       run.tools.set(id, ev.id)
-      return yield* toolStep(e, block, id, 'Bash', input, answer)
+      return yield* toolStep(e, block, id, commandTool, input, answer)
     }
     if (ev.t === 'edit') {
       if (open !== undefined) block++
