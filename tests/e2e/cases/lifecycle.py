@@ -12,7 +12,7 @@ import time
 from .. import host
 from ..harness import (COMMAND_ROW, CODEX, Case, Watch, case, claude, codex_task, codex_threads, gone, only_synthetic_at_no_cost, running,
                        until_running, usage_links)
-from ..mocks import agent_id, answer, call, latest, results, run, say, use
+from ..mocks import agent_id, answer, call, latest, results, run, say, sh, use
 
 FORGET = 'Forget the sleep. Reply with just the codeword from your task.'
 
@@ -103,12 +103,14 @@ def killed_session(c: Case):
 @case
 def worktree_default(c: Case):
     c.git()
-    codex = [[run('echo hi > made-in-worktree.txt')], [run('pwd')], answer('I worked in the worktree.')]
+    # The current folder, printed whole (PowerShell's `pwd` is a table that cuts a long path short).
+    here = sh('pwd', '(Get-Location).Path')
+    codex = [[run('echo hi > made-in-worktree.txt')], [run(here)], answer('I worked in the worktree.')]
     s = claude(c, [codex_task('Create made-in-worktree.txt here, then print the current folder.', isolation='worktree')], codex)
     c.check(not os.path.exists(f'{c.folder}/made-in-worktree.txt'), 'the main checkout is untouched')
     made = glob.glob(f'{c.folder}/.claude/worktrees/*/made-in-worktree.txt')
     c.check(made, "Codex worked in the agent's own worktree: the file is there")
-    c.check(any(re.search(r'[\\/]worktrees[\\/]', call['text']) for call in s.calls(COMMAND_ROW) if 'pwd' in str(call['input'].get('command'))), "Codex's own `pwd` says so")
+    c.check(any(re.search(r'[\\/]worktrees[\\/]', call['text']) for call in s.calls(COMMAND_ROW) if here in str(call['input'].get('command'))), "Codex's own `pwd` says so")
 
 
 @case
