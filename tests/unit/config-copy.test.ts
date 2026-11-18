@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { ownConfig } from '../../hooks/codex-home'
+import { defaultsOf, ownConfig } from '../../hooks/codex-home'
 
-// The copy of the person's Codex config, without its context tables and keys.
+// The copy of the person's Codex config, without its context tables and keys,
+// and the defaults the mod reads from it.
 
 const CONFIG = [
   'model = "gpt-x"',
@@ -78,6 +79,8 @@ describe('the copy of the Codex config', () => {
         'mcp_servers = { node_repl = { command = "node" } }',
         'mcp_servers.computer-use.command = "cu"',
         '"apps".docs.enabled = true',
+        'plugins."documents@openai".enabled = true',
+        'mcp_servers . "a/b:c" . command = "x"',
         'plugins = [',
         '  "documents@openai",',
         '  "pdf@openai",',
@@ -88,7 +91,7 @@ describe('the copy of the Codex config', () => {
         'mcp_servers.x = "a key of the tui table, not the context table"',
       ].join('\n'),
     )
-    for (const gone of ['node_repl', 'computer-use', 'docs.enabled', 'documents@openai', 'pdf@openai', 'a bracket']) {
+    for (const gone of ['node_repl', 'computer-use', 'docs.enabled', 'documents@openai', 'a/b:c', 'pdf@openai', 'a bracket']) {
       expect(copy.includes(gone)).toBe(false)
     }
     // What follows each of them is read as its own key again.
@@ -117,7 +120,31 @@ describe('the copy of the Codex config', () => {
     expect(copy.includes('instructions = "kept"')).toBe(true)
   })
 
+  test('a value that spans lines goes or stays whole, whatever its lines look like', () => {
+    const kept = ownConfig(['[profiles.work]', 'notes = """', '[mcp_servers.x]', '"""', 'model = "kept"', '[mcp_servers.y]', 'command = "gone"'].join('\n'))
+    expect(kept).toBe(['[profiles.work]', 'notes = """', '[mcp_servers.x]', '"""', 'model = "kept"'].join('\n'))
+    const gone = ownConfig(['[mcp_servers.x]', 'notes = """', '[features]', '"""', '[features]', 'plugins = true'].join('\n'))
+    expect(gone).toBe('[features]\nplugins = true')
+  })
+
   test('an empty or missing config is an empty copy', () => {
     expect(ownConfig('')).toBe('')
+  })
+})
+
+describe("the person's Codex defaults", () => {
+  test('are the model and effort set before the first header', () => {
+    expect(defaultsOf(CONFIG)).toEqual({ defaults: { model: 'gpt-x', effort: undefined }, hasApprovalPolicy: true })
+    expect(defaultsOf("  \"model\" = 'gpt-y'\nmodel_reasoning_effort = \"high\"\n").defaults).toEqual({ model: 'gpt-y', effort: 'high' })
+    expect(defaultsOf('[profiles.work]\nmodel = "gpt-z"\nmodel_reasoning_effort = "low"').defaults).toEqual({ model: undefined, effort: undefined })
+    expect(defaultsOf('model = 5\nmodel_reasoning_effort = ""').defaults).toEqual({ model: undefined, effort: undefined })
+  })
+
+  test('set an approval policy only by its own key before the first header', () => {
+    expect(defaultsOf('approval_policy = "never"').hasApprovalPolicy).toBe(true)
+    expect(defaultsOf('"approval_policy" = "never"').hasApprovalPolicy).toBe(true)
+    for (const config of ['', 'approval_policy.x = 1', '[approval_policy]\nx = 1', '[profiles.work]\napproval_policy = "never"', 'notes = """\napproval_policy = "never"\n"""']) {
+      expect(defaultsOf(config).hasApprovalPolicy).toBe(false)
+    }
   })
 })
