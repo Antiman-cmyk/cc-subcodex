@@ -370,8 +370,32 @@ running = host.running
 until_running = host.until_running
 
 
-def watch(command: str, seen: dict, stop: threading.Event):
-    while not stop.is_set():
-        if running(command):
-            seen['seen'] = True
+class Watch:
+    """Looks, in the background, for a process that runs `command`, until one does or `stop()`; `at` is when one
+    was first seen."""
+
+    def __init__(self, command: str):
+        self.command = command
+        self.at: float | None = None
+        self._stop = threading.Event()
+        threading.Thread(target=self._look, daemon=True).start()
+
+    def _look(self) -> None:
+        while not self._stop.is_set():
+            if running(self.command):
+                self.at = time.time()
+                return
+            time.sleep(0.5)
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
+def gone(command: str, within: float) -> bool:
+    """Whether no process runs `command` within so many seconds."""
+    deadline = time.time() + within
+    while running(command):
+        if time.time() >= deadline:
+            return False
         time.sleep(0.5)
+    return True

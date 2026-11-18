@@ -28,15 +28,20 @@ def processes() -> list[dict]:
     return json.loads(out.decode('utf-8'))
 
 
-def descendants(roots: set[int], listed: list[dict]) -> list[dict]:
-    """The processes started by the given ones, at any depth, still running (their parents may have ended)."""
+def descendants(roots: set[int], listed: list[dict], held: dict[int, int]) -> list[dict]:
+    """The processes started by the given ones, which have ended, at any depth, still running. `held` is when the
+    process holding each id now started: Windows gives an ended process's id to a later one, and a child started
+    before that one is the ended process's."""
     children: dict[int, list[dict]] = {}
     for one in listed:
         children.setdefault(int(one['ppid'] or 0), []).append(one)
     found, todo, seen = [], list(roots), set(roots)
     while todo:
-        for child in children.get(todo.pop(), []):
-            if child['pid'] not in seen:
+        parent = todo.pop()
+        since = held.get(parent)
+        for child in children.get(parent, []):
+            ours = since is None or (child['started'] < since if parent in roots else child['started'] >= since)
+            if ours and child['pid'] not in seen:
                 seen.add(child['pid'])
                 found.append(child)
                 todo.append(child['pid'])
@@ -74,10 +79,10 @@ def leftovers(sessions: set[int], since: float, root: str) -> list[str]:
         listed = subprocess.run(['pgrep', '-fl', f'{os.path.realpath(root)}/[^ ]*\\.home/'], capture_output=True, text=True).stdout.split('\n')
         return [line for line in listed if line.strip()]
     everything = processes()
-    alive = {one['pid'] for one in everything}
+    held = {one['pid']: one['started'] for one in everything}
     listed = [one for one in everything if one['started'] >= int(since)]
-    servers = [one for one in listed if 'app-server' in str(one['cmd']) and one['ppid'] not in alive]
-    left = {one['pid']: one for one in descendants(sessions, listed) + servers}
+    servers = [one for one in listed if 'app-server' in str(one['cmd']) and held.get(one['ppid'], one['started'] + 1) > one['started']]
+    left = {one['pid']: one for one in descendants(sessions, listed, held) + servers}
     return [f'{one["pid"]} {one["cmd"] or one["name"]}' for one in left.values()]
 
 
