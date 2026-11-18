@@ -1,6 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import { LIVE_CHARS } from './config'
+
 // The output of Codex's commands while they run, drawn under each running
 // command row (Bash or PowerShell) of a Codex agent; the row's result shows
 // the whole output once the command ends.
@@ -8,13 +10,12 @@ import type { EngineInterface, Register } from 'claude-code'
 /** The latest output of each running mirrored command, by its row's tool_use_id. */
 const live = atom({ plugin: 'subcodex', key: 'live' } as const, {})
 
-/** How much of a command's latest output is kept, and how many of its last lines are drawn. */
-const KEPT_CHARS = 4_000
+/** How many of a command's last lines are drawn. */
 const DRAWN_LINES = 5
 
 /** Adds a piece of a running command's output. */
 export async function addOutput($: EngineInterface, toolUseId: string, text: string): Promise<void> {
-  await update($, live, now => ({ ...now, [toolUseId]: `${now[toolUseId] ?? ''}${text}`.slice(-KEPT_CHARS) }))
+  await update($, live, now => ({ ...now, [toolUseId]: `${now[toolUseId] ?? ''}${text}`.slice(-LIVE_CHARS) }))
 }
 
 /** Drops the output kept for rows whose tool_use_id starts with `prefix`: one row, or all of an agent's. */

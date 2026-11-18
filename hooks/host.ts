@@ -16,7 +16,6 @@ export type Op =
   | 'look'
   | 'prune'
   | 'wipe'
-  | 'left'
   | 'remove'
   | 'sleep'
   | 'noop'

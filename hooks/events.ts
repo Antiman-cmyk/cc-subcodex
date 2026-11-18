@@ -125,16 +125,9 @@ export function fromThread(message: Rpc, seen: Seen): Ev[] {
     }
     // Other items, one line each.
     if (item.type === 'mcpToolCall') {
-      const asked = JSON.stringify(item.arguments ?? {})
+      const asked = cut(JSON.stringify(item.arguments ?? {}), 300)
       const failed = item.status === 'failed' ? ` failed: ${item.error?.message ?? 'no reason given'}` : ''
-      return [
-        {
-          t: 'text',
-          text: `[Codex used its own tool ${item.server ?? '?'}.${item.tool ?? '?'} ${asked.length > 300 ? `${asked.slice(0, 300)}…` : asked}${failed}]`,
-          id: item.id,
-          isAside: true,
-        },
-      ]
+      return [aside(`Codex used its own tool ${item.server ?? '?'}.${item.tool ?? '?'} ${asked}${failed}`, item.id)]
     }
     if (item.type === 'webSearch') {
       const what =
@@ -148,14 +141,7 @@ export function fromThread(message: Rpc, seen: Seen): Ev[] {
         .slice(0, RESULTS)
         .map(one => `\n- ${one.title ?? one.url} ${one.title === undefined ? '' : `(${one.url})`}`.trimEnd())
       const more = (item.results ?? []).length - found.length
-      return [
-        {
-          t: 'text',
-          text: `[Codex ${what}${found.length === 0 ? '' : `; it found:${found.join('')}${more > 0 ? `\n- and ${more} more` : ''}`}]`,
-          id: item.id,
-          isAside: true,
-        },
-      ]
+      return [aside(`Codex ${what}${found.length === 0 ? '' : `; it found:${found.join('')}${more > 0 ? `\n- and ${more} more` : ''}`}`, item.id)]
     }
     if (item.type === 'plan' && (item.text ?? '') !== '') {
       return [{ t: 'text', text: `[Codex's plan]\n${item.text}`, id: item.id, isAside: true }]
@@ -312,8 +298,7 @@ export function inline(path: string, headed: Set<string>, ev: Ev): Ev[] {
       { ...ev, text: isHeaded ? ev.text : `[Codex sub-agent ${path}] ${ev.text}`, by: path },
     ]
   }
-  if (ev.t === 'cmd' || ev.t === 'edit') return [{ ...ev, by: path }]
+  if (ev.t === 'cmd' || ev.t === 'edit' || ev.t === 'compacted') return [{ ...ev, by: path }]
   if (ev.t === 'cmd_done' || ev.t === 'cmd_output') return [ev]
-  if (ev.t === 'compacted') return [{ ...ev, by: path }]
   return []
 }

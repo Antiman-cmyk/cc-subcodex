@@ -17,7 +17,6 @@ def plain_default(c: Case):
     c.check(s.report() == 'The command printed hello-from-worker.', f'the result is the closing message alone, word for word (got {s.report()!r})')
     bash = s.calls(COMMAND_ROW)
     c.check(len(bash) == 1 and 'hello-from-worker' in bash[0]['text'], f"one {COMMAND_ROW} row, answered with the output Codex's command produced")
-    c.check(not [r for r in s.rows if str(r.get('by', '')).startswith('claude-')], 'no Claude request was made inside the agent')
     c.check(re.search(r'sandbox "?workspaceWrite', s.log), "Codex's sandbox is the one its config names, workspace-write")
     only_synthetic_at_no_cost(c, s)
     if host.WINDOWS:

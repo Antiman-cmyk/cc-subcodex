@@ -11,7 +11,7 @@ import { forgetLastPass } from './usage-links'
 // `/subcodex`: the mod's status (Codex, defaults, login, last usage limits),
 // what it keeps on disk (session files, their links in the person's Codex
 // home, agent records), and cleaning that up by age or entirely. The host
-// operations `look`, `prune`, `wipe` and `left` (host.ts) do the disk work.
+// operations `look`, `prune` and `wipe` (host.ts) do the disk work.
 // Cleaning by age has the next usage-link pass look at every day folder.
 
 /** The command's name. */
@@ -118,8 +118,8 @@ export async function upkeep($: EngineInterface, typed: string): Promise<string>
     const days = Number(what)
     if (what === undefined || !Number.isInteger(days) || days < 0) return `Say how old, or all.\n${HOW}`
     if (isBusy && days === 0) return BUSY
-    const files = (await run('prune', String(days))).trim().split('\n')[0] ?? '0'
-    const gone = await forget($, home, await run('left'))
+    const [files = '0', ...left] = (await run('prune', String(days))).trim().split('\n')
+    const gone = await forget($, home, left.join('\n'))
     await forgetLastPass($, home)
     return `Removed ${files} session files last written more than ${days} days ago, with their links, and ${gone} agent records that pointed at no session. Any link the other session files are missing is made as the next Codex agent starts.`
   }

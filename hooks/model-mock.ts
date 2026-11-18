@@ -84,21 +84,22 @@ export function registerModelMock(on: Parameters<Register>[0]): void {
     const agent = id === undefined ? undefined : agents.get(id)
     let body: unknown
     try { body = typeof e.init?.body === 'string' ? JSON.parse(e.init.body) : undefined } catch { /* Checked below. */ }
-    if (agent === undefined && (!object(body) || body.model !== LOCAL_MODEL)) return next(e)
+    const local = object(body) && body.model === LOCAL_MODEL ? body : undefined
+    if (agent === undefined && local === undefined) return next(e)
     const request = id === undefined ? undefined : mockRequests.get(id)
-    if (agent === undefined || request === undefined || !object(body) || body.model !== LOCAL_MODEL) {
+    if (agent === undefined || request === undefined || local === undefined) {
       return { deny: 'subcodex: no pending local protocol request; a Claude request will not be sent.' }
     }
     if (agent.mode === 'auto' && request.kind !== 'prepare' && request.kind !== 'error' &&
-        (!Array.isArray(body.safeguards) || !body.safeguards.some(one => object(one) && one.type === 'dangerous_tool_use'))) {
+        (!Array.isArray(local.safeguards) || !local.safeguards.some(one => object(one) && one.type === 'dangerous_tool_use'))) {
       return { deny: 'subcodex: this engine did not request the auto-mode protocol; local delivery is unsupported.' }
     }
     if (request.kind === 'prepare') {
-      agent.outputSchema = outputSchema(body)
+      agent.outputSchema = outputSchema(local)
       agent.isPrepared = true
     }
     trace($, `local protocol: ${request.kind === 'call' ? request.name : request.kind} for ${id}; no Claude request`)
-    return { value: mockResponse(request, body.stream === true, `toolu_subcodex_${++sequence}_${id}`) }
+    return { value: mockResponse(request, local.stream === true, `toolu_subcodex_${++sequence}_${id}`) }
   }).catch((_$, e, next) => {
     // An error before next() must not turn this mod into a gate for another
     // agent or plugin. Already forwarded calls are replayed by the engine.
