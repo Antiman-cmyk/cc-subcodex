@@ -12,9 +12,8 @@ export async function findCodex($: EngineInterface): Promise<Codex> {
   if (found !== undefined) return found
   let bin = 'codex'
   const home = await homeOf($)
-  const defaults: Settings = { model: undefined, effort: undefined }
+  let settings = defaultsOf('')
   const models: string[] = []
-  let hasApprovalPolicy = false
   let isHostMissing = false
   try {
     // Where `codex` is (`find`): the last line, as a login shell may print first.
@@ -25,12 +24,7 @@ export async function findCodex($: EngineInterface): Promise<Codex> {
     })
     const path = asked?.stdout.trim().split('\n').pop()?.trim() ?? ''
     if (isAbsolute(path)) bin = path
-    // Top-level keys: the text before the first table header.
-    const config = await $.fs.read(`${home}/${OWN_CODEX_HOME}/config.toml`)
-    const top = config.split(/^\[/m)[0] ?? ''
-    defaults.model = /^model\s*=\s*"([^"]+)"/m.exec(top)?.[1]
-    defaults.effort = /^model_reasoning_effort\s*=\s*"([^"]+)"/m.exec(top)?.[1]
-    hasApprovalPolicy = /^approval_policy\s*=/m.test(top)
+    settings = defaultsOf(await $.fs.read(`${home}/${OWN_CODEX_HOME}/config.toml`))
     // The models Codex lists, from its cache.
     const cache = JSON.parse(
       await $.fs.read(`${home}/${OWN_CODEX_HOME}/models_cache.json`),
@@ -42,7 +36,7 @@ export async function findCodex($: EngineInterface): Promise<Codex> {
     }
   } catch {
   }
-  found = { bin, home, defaults, models, hasApprovalPolicy, isHostMissing }
+  found = { bin, home, ...settings, models, isHostMissing }
   return found
 }
 
@@ -69,9 +63,75 @@ export async function loginOf(
 }
 
 /** How many more brackets and braces a line opens than it closes, outside strings and comments. */
-export function depthOf(text: string): number {
+function depthOf(text: string): number {
   const bare = text.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '').replace(/#.*/, '')
   return (bare.match(/[[{]/g)?.length ?? 0) - (bare.match(/[\]}]/g)?.length ?? 0)
+}
+
+/** One part of a dotted TOML key: bare, or quoted. */
+const KEY_PART = String.raw`(?:[A-Za-z0-9_-]+|"(?:[^"\\]|\\.)*"|'[^']*')`
+
+/** A key at the start of a TOML line, and what follows its `=`. */
+const KEY = new RegExp(String.raw`^\s*(${KEY_PART}(?:\s*\.\s*${KEY_PART})*)\s*=\s*(.*)$`)
+
+/** A TOML name without its quotes and spaces: `projects."/a b"` is `projects./ab`. */
+const bare = (name: string): string => name.replace(/["'\s]/g, '')
+
+/** The first part of a dotted TOML name. */
+const headOf = (name: string): string => name.split('.')[0] ?? ''
+
+/** One line of a TOML text, with the lines of a value it starts that spans lines. */
+type Statement = {
+  lines: string[]
+  /** The table it is in, or the table a header opens, its parts joined by dots; '' before the first header. */
+  table: string
+  /** The key it sets, its dotted parts joined; undefined for a header and a line without a key. */
+  key: string | undefined
+  /** What follows the key's `=` on its first line. */
+  value: string
+}
+
+/** A TOML text, line by line; a value that spans lines is part of the statement it starts. */
+function statementsOf(toml: string): Statement[] {
+  const all: Statement[] = []
+  let table = ''
+  /** What ends a value that spans lines: closing quotes, or bracket depth. */
+  let closing: string | undefined
+  let depth = 0
+  for (const line of toml.split('\n')) {
+    if (closing !== undefined || depth > 0) {
+      all[all.length - 1]?.lines.push(line)
+      if (closing === undefined) depth += depthOf(line)
+      else if (line.includes(closing)) closing = undefined
+      continue
+    }
+    const header = /^\s*\[\[?\s*([^\]]+?)\s*\]/.exec(line)
+    if (header !== null) table = bare(header[1] ?? '')
+    const key = header === null ? KEY.exec(line) : null
+    const value = key?.[2] ?? ''
+    all.push({ lines: [line], table, key: key === null ? undefined : bare(key[1] ?? ''), value })
+    const quote = value.startsWith('"""') ? '"""' : value.startsWith("'''") ? "'''" : undefined
+    if (quote !== undefined && !value.slice(3).includes(quote)) closing = quote
+    else if (/^[[{]/.test(value)) depth = Math.max(0, depthOf(value))
+  }
+  return all
+}
+
+/** The model and effort a Codex config sets before its first header, and whether it sets an approval policy there. */
+export function defaultsOf(config: string): { defaults: Settings; hasApprovalPolicy: boolean } {
+  const top = new Map<string, string>()
+  for (const { table, key, value } of statementsOf(config)) {
+    if (table === '' && key !== undefined && !top.has(key)) top.set(key, value)
+  }
+  /** A string value on one line, without its quotes. */
+  const text = (key: string): string | undefined => {
+    const found = /^(?:"([^"]+)"|'([^']+)')/.exec(top.get(key) ?? '')
+    return found?.[1] ?? found?.[2]
+  }
+  return {
+    defaults: { model: text('model'), effort: text('model_reasoning_effort') },
+    hasApprovalPolicy: top.has('approval_policy'),
+  }
 }
 
 /**
@@ -79,76 +139,25 @@ export function depthOf(text: string): number {
  * including ones set before the first header, inline or dotted.
  */
 export function ownConfig(text: string): string {
-  const kept: string[] = []
-  let isTop = true
-  let isDropping = false
-  /** What ends a left-out value that spans lines: closing quotes, or bracket depth. */
-  let closing: string | undefined
-  let depth = 0
-  for (const line of text.split('\n')) {
-    if (closing !== undefined) {
-      if (line.includes(closing)) closing = undefined
-      continue
-    }
-    if (depth > 0) {
-      depth += depthOf(line)
-      continue
-    }
-    const header = /^\s*\[\[?\s*["']?([A-Za-z0-9_-]+)/.exec(line)
-    if (header !== null) {
-      isTop = false
-      isDropping = CONTEXT_TABLES.includes(header[1] ?? '')
-    }
-    if (isDropping) continue
-    const key = isTop ? /^\s*["']?([A-Za-z0-9_-]+)["']?\s*(\.[^=]*)?=\s*(.*)$/.exec(line) : null
-    const name = key?.[1] ?? ''
-    if (key !== null && (CONTEXT_TABLES.includes(name) || (key[2] === undefined && CONTEXT_KEYS.includes(name)))) {
-      const value = key[3] ?? ''
-      const quote = value.startsWith('"""') ? '"""' : value.startsWith("'''") ? "'''" : undefined
-      if (quote !== undefined && !value.slice(3).includes(quote)) closing = quote
-      else if (/^[[{]/.test(value)) depth = Math.max(0, depthOf(value))
-      continue
-    }
-    kept.push(line)
-  }
-  return kept.join('\n')
+  const isContext = ({ table, key }: Statement): boolean =>
+    table !== ''
+      ? CONTEXT_TABLES.includes(headOf(table))
+      : key !== undefined && (CONTEXT_TABLES.includes(headOf(key)) || CONTEXT_KEYS.includes(key))
+  return statementsOf(text)
+    .filter(statement => !isContext(statement))
+    .flatMap(statement => statement.lines)
+    .join('\n')
 }
 
 /** The keys a TOML text sets, each with the table it is in (`table.key`, dotted keys joined); values that span lines are skipped. */
 export function keysOf(toml: string): string[] {
-  const bare = (name: string): string => name.replace(/["'\s]/g, '')
-  const keys: string[] = []
-  let table = ''
-  let closing: string | undefined
-  let depth = 0
-  for (const line of toml.split('\n')) {
-    if (closing !== undefined) {
-      if (line.includes(closing)) closing = undefined
-      continue
-    }
-    if (depth > 0) {
-      depth += depthOf(line)
-      continue
-    }
-    const header = /^\s*\[\[?\s*([^\]]+?)\s*\]/.exec(line)
-    if (header !== null) {
-      table = bare(header[1] ?? '')
-      continue
-    }
-    const key = /^\s*([A-Za-z0-9_."'-][A-Za-z0-9_."' -]*?)\s*=\s*(.*)$/.exec(line)
-    if (key === null) continue
-    const name = table === '' ? bare(key[1] ?? '') : `${table}.${bare(key[1] ?? '')}`
-    const value = key[2] ?? ''
-    keys.push(name)
+  return statementsOf(toml).flatMap(({ table, key, value }) => {
+    if (key === undefined) return []
+    const name = table === '' ? key : `${table}.${key}`
     // An inline table: `windows = { sandbox = "mxc" }`.
-    for (const inner of value.match(/[{,]\s*([A-Za-z0-9_-]+)\s*=/g) ?? []) {
-      keys.push(`${name}.${bare(inner.replace(/^[{,]|=$/g, ''))}`)
-    }
-    const quote = value.startsWith('"""') ? '"""' : value.startsWith("'''") ? "'''" : undefined
-    if (quote !== undefined && !value.slice(3).includes(quote)) closing = quote
-    else if (/^[[{]/.test(value)) depth = Math.max(0, depthOf(value))
-  }
-  return keys
+    const inner = (value.match(/[{,]\s*([A-Za-z0-9_-]+)\s*=/g) ?? []).map(found => `${name}.${bare(found.replace(/^[{,]|=$/g, ''))}`)
+    return [name, ...inner]
+  })
 }
 
 /**
