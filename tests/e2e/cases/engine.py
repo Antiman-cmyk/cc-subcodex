@@ -7,7 +7,15 @@ from .. import host
 from ..harness import COMMAND_ROW, Case, case, claude, codex_task, only_synthetic_at_no_cost, usage_links
 from ..mocks import LINES, agent_id, answer, call, latest, note, patch, run, say, sh, use
 
-PLAIN = [[note('I will run one command first.'), run('echo hello-from-worker')], answer('The command printed hello-from-worker.')]
+# Codex's command: it adds a line to ran.txt each time it runs.
+ONCE = sh('echo ran >> ran.txt; echo hello-from-worker', "Add-Content ran.txt ran; 'hello-from-worker'")
+PLAIN = [[note('I will run one command first.'), run(ONCE)], answer('The command printed hello-from-worker.')]
+
+
+def _runs(c: Case) -> int:
+    """How many times Codex's command has run in the case's folder."""
+    path = os.path.join(c.folder, 'ran.txt')
+    return len(open(path).read().split()) if os.path.exists(path) else 0
 
 
 @case
@@ -17,6 +25,7 @@ def plain_default(c: Case):
     c.check(s.report() == 'The command printed hello-from-worker.', f'the result is the closing message alone, word for word (got {s.report()!r})')
     bash = s.calls(COMMAND_ROW)
     c.check(len(bash) == 1 and 'hello-from-worker' in bash[0]['text'], f"one {COMMAND_ROW} row, answered with the output Codex's command produced")
+    c.check(_runs(c) == 1, f'the command ran once, in Codex: its {COMMAND_ROW} row did not run it again ({_runs(c)} runs)')
     c.check(re.search(r'sandbox "?workspaceWrite', s.log), "Codex's sandbox is the one its config names, workspace-write")
     only_synthetic_at_no_cost(c, s)
     if host.WINDOWS:
@@ -24,6 +33,7 @@ def plain_default(c: Case):
         rows = bare.calls('Bash')
         c.check(len(rows) == 1 and 'hello-from-worker' in rows[0]['text'] and not bare.calls('PowerShell'),
                 'in a session without the PowerShell tool, the command is a Bash row')
+        c.check(_runs(c) == 2, f'... which did not run it again either ({_runs(c) - 1} runs)')
 
 
 @case
@@ -33,6 +43,9 @@ def plain_auto(c: Case):
     backs = s.calls('SubagentHandback')
     c.check(len(backs) == 1 and backs[0]['by'] == '<synthetic>', 'the result is handed back once, by the local protocol')
     c.check(s.report() == 'The command printed hello-from-worker.', 'the hand-back is the closing message, word for word, without notes')
+    rows = s.calls(COMMAND_ROW)
+    c.check(len(rows) == 1 and 'hello-from-worker' in rows[0]['text'] and not rows[0]['error'], f"one {COMMAND_ROW} row, answered with the output Codex's command produced")
+    c.check(_runs(c) == 1, f'the command ran once, in Codex: in auto mode too its {COMMAND_ROW} row did not run it again ({_runs(c)} runs)')
     only_synthetic_at_no_cost(c, s)
 
 
@@ -133,16 +146,17 @@ def team_default(c: Case):
 @case
 def long_auto(c: Case):
     c.plain()
-    # The engine cuts its copy of the context after about 350 of these commands' rows.
-    shards = 450 if host.WINDOWS else 600
+    # With a compaction window of 50,000 tokens the engine cuts its copy of the context about every 24 of these rows.
+    shards = 60
     page = sh("seq 1 400 | sed 's/^/row checked against baseline, drift within tolerance, status nominal, line /'",
               '1..400 | ForEach-Object { "row checked against baseline, drift within tolerance, status nominal, line $_" }')
     steps = [[run(f'echo shard {n}; {page}')] for n in range(shards)] + [answer(f'All {shards} shards scanned. Nothing drifted; the codeword for this run is HERON-42.')]
     main = [codex_task('Scan every shard and report.'), lambda body: say(f'Its codeword: {latest(body) or body}'[:2000])]
-    s = claude(c, main, steps, mode='auto', timeout=2400 if host.WINDOWS else 900)
-    c.check('HERON-42' in s.report(), 'a run far longer than a context window still ends with its result')
+    s = claude(c, main, steps, mode='auto', timeout=600, env={'CLAUDE_CODE_AUTO_COMPACT_WINDOW': '50000'})
+    c.check('HERON-42' in s.report(), 'a run far longer than its context window still ends with its result')
     c.check(len(s.calls(COMMAND_ROW)) >= shards, f'all {shards} commands are rows of the transcript')
-    c.check(any(r['kind'] == 'compacted' for r in s.rows), "the engine's copy of the context was cut on the way")
+    cuts = sum(r['kind'] == 'compacted' for r in s.rows)
+    c.check(cuts >= 2, f"the engine's copy of the context was cut on the way, and cut again ({cuts} times)")
     c.check('Prompt is too long' not in s.log and 'terminated early' not in s.log, 'no step was refused as too long, and the agent was not ended')
     c.check(all(len(call['text']) <= 2000 + 6000 + 200 for call in s.calls(COMMAND_ROW)), "each command's mirrored output is held to its start and end")
     back = s.calls('SubagentHandback')

@@ -61,6 +61,12 @@ def _stop_steps(seconds: int) -> list:
     return [call('Bash', command=until_running(f'sleep {seconds}'), timeout=120000), *_stop()]
 
 
+def _waited(s, seconds: int) -> bool:
+    """Whether the main session's wait (`_stop_steps`) ended with Codex's command running: it fails otherwise."""
+    return any(call['name'] == 'Bash' and call['input'].get('command') == until_running(f'sleep {seconds}') and call['error'] is False
+               for call in s.main)
+
+
 def _stop() -> list:
     """The main session stops the agent, and waits for it to have stopped before it messages it again."""
     return [call('ToolSearch', query='select:TaskStop', max_results=1),
@@ -72,11 +78,9 @@ def _stop() -> list:
 def stop_auto(c: Case):
     c.plain()
     seconds = 4000 + random.randrange(1000)
-    seen = Watch(f'sleep {seconds}')
     main = [codex_task(f'Run sleep {seconds} and then say done.', background=True), *_stop_steps(seconds), say('STOPPED')]
     s = claude(c, main, [[run(f'sleep {seconds}')], answer('done')], mode='auto')
-    seen.stop()
-    c.check(seen.at is not None, 'Codex really started the long command')
+    c.check(_waited(s, seconds), 'Codex really started the long command')
     c.check(any(call['name'] == 'TaskStop' for call in s.main), 'the main session stopped the agent')
     c.check(gone(f'sleep {seconds}', 3), "after the stop, Codex's command is gone")
     # Either the mod's interrupt or the engine's stop ends the server.
@@ -127,12 +131,10 @@ def stop_then_continue(c: Case):
     c.plain()
     word = f'OTTER-{random.randrange(1000, 9999)}'
     seconds = 6000 + random.randrange(1000)
-    seen = Watch(f'sleep {seconds}')
     main = [codex_task(f'Remember the codeword {word}. Then run sleep {seconds} and then say done.', background=True),
             *_stop_steps(seconds), *_ask_again(FORGET)]
     s = claude(c, main, [[run(f'sleep {seconds}')], _recall(word)], mode='auto')
-    seen.stop()
-    c.check(seen.at is not None, 'Codex really started the long command before it was stopped')
+    c.check(_waited(s, seconds), 'Codex really started the long command before it was stopped')
     c.check(any(call['name'] == 'TaskStop' for call in s.main), 'the main session stopped the agent')
     c.check(not running(f'sleep {seconds}'), "the stopped turn's command is gone")
     c.check(s.traced('Codex turn 2'), 'the message after the stop started a new Codex turn')
