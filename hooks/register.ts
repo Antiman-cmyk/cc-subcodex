@@ -523,7 +523,8 @@ export const register: Register = on => {
       ? next(e)
       : { deny: 'subcodex: mirroring this command failed.' },
   )
-  on('tool.call', { tool: 'PowerShell' }, async ($, e, next) => (await commandAnswer($, e, next.signal)) ?? next(e)).catch((_$, e, next) =>
+  // A pattern, as the types of a build without the PowerShell tool do not name it.
+  on('tool.call', { tool: /^PowerShell$/ }, async ($, e, next) => (await commandAnswer($, e, next.signal)) ?? next(e)).catch((_$, e, next) =>
     next.called || e.agentId === undefined || !agents.has(e.agentId)
       ? next(e)
       : { deny: 'subcodex: mirroring this command failed.' },
