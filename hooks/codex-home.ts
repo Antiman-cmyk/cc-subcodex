@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, InstructionFile } from 'claude-code'
 
 import { CONTEXT_KEYS, CONTEXT_TABLES, OWN_CODEX_HOME } from './config'
+import { folderList, homeOf, hostRun, isAbsolute, isWindows } from './host'
 import type { Codex, Settings } from './types'
 
 let found: Codex | undefined
@@ -10,16 +11,20 @@ let found: Codex | undefined
 export async function findCodex($: EngineInterface): Promise<Codex> {
   if (found !== undefined) return found
   let bin = 'codex'
-  const home = (await $.env.get('HOME')) ?? ''
+  const home = await homeOf($)
   const defaults: Settings = { model: undefined, effort: undefined }
   const models: string[] = []
   let hasApprovalPolicy = false
+  let isHostMissing = false
   try {
-    // The login shell's PATH; the last line, as a login shell may print first.
+    // Where `codex` is (`find`): the last line, as a login shell may print first.
     const shell = (await $.env.get('SHELL')) ?? '/bin/sh'
-    const asked = await $.process.run([shell, '-lc', 'command -v codex']).catch(() => undefined)
-    const path = asked?.stdout.trim().split('\n').pop() ?? ''
-    if (path.startsWith('/')) bin = path
+    const asked = await hostRun($, 'find', [shell]).catch((error: unknown) => {
+      isHostMissing = isWindows($) && /\bENOENT\b/.test(String(error))
+      return undefined
+    })
+    const path = asked?.stdout.trim().split('\n').pop()?.trim() ?? ''
+    if (isAbsolute(path)) bin = path
     // Top-level keys: the text before the first table header.
     const config = await $.fs.read(`${home}/${OWN_CODEX_HOME}/config.toml`)
     const top = config.split(/^\[/m)[0] ?? ''
@@ -37,7 +42,7 @@ export async function findCodex($: EngineInterface): Promise<Codex> {
     }
   } catch {
   }
-  found = { bin, home, defaults, models, hasApprovalPolicy }
+  found = { bin, home, defaults, models, hasApprovalPolicy, isHostMissing }
   return found
 }
 
@@ -109,6 +114,56 @@ export function ownConfig(text: string): string {
   return kept.join('\n')
 }
 
+/** The keys a TOML text sets, each with the table it is in (`table.key`, dotted keys joined); values that span lines are skipped. */
+export function keysOf(toml: string): string[] {
+  const bare = (name: string): string => name.replace(/["'\s]/g, '')
+  const keys: string[] = []
+  let table = ''
+  let closing: string | undefined
+  let depth = 0
+  for (const line of toml.split('\n')) {
+    if (closing !== undefined) {
+      if (line.includes(closing)) closing = undefined
+      continue
+    }
+    if (depth > 0) {
+      depth += depthOf(line)
+      continue
+    }
+    const header = /^\s*\[\[?\s*([^\]]+?)\s*\]/.exec(line)
+    if (header !== null) {
+      table = bare(header[1] ?? '')
+      continue
+    }
+    const key = /^\s*([A-Za-z0-9_."'-][A-Za-z0-9_."' -]*?)\s*=\s*(.*)$/.exec(line)
+    if (key === null) continue
+    const name = table === '' ? bare(key[1] ?? '') : `${table}.${bare(key[1] ?? '')}`
+    const value = key[2] ?? ''
+    keys.push(name)
+    // An inline table: `windows = { sandbox = "mxc" }`.
+    for (const inner of value.match(/[{,]\s*([A-Za-z0-9_-]+)\s*=/g) ?? []) {
+      keys.push(`${name}.${bare(inner.replace(/^[{,]|=$/g, ''))}`)
+    }
+    const quote = value.startsWith('"""') ? '"""' : value.startsWith("'''") ? "'''" : undefined
+    if (quote !== undefined && !value.slice(3).includes(quote)) closing = quote
+    else if (/^[[{]/.test(value)) depth = Math.max(0, depthOf(value))
+  }
+  return keys
+}
+
+/**
+ * What Codex's server is also started with: on Windows, where the person's
+ * Codex config chooses neither `features.prefer_mxc` nor `windows.sandbox`,
+ * Codex prefers its MXC sandbox, and says nothing of the feature being under
+ * development.
+ */
+export function sandboxChoice($: EngineInterface, config: string): string[] {
+  if (!isWindows($)) return []
+  const keys = keysOf(config)
+  if (keys.includes('features.prefer_mxc') || keys.includes('windows.sandbox')) return []
+  return ['-c', 'features.prefer_mxc=true', '-c', 'suppress_unstable_features_warning=true']
+}
+
 /** Which plugins the settings turn on or off (`enabledPlugins`): the person's, then the project's, then the local ones. */
 async function pluginSwitches($: EngineInterface, home: string, cwd: string): Promise<Record<string, boolean>> {
   const switches: Record<string, boolean> = {}
@@ -151,8 +206,7 @@ export async function skillRoots(
   } catch {
     // No plugins on record.
   }
-  const dirs = (await $.env.get('CLAUDE_CODE_PLUGIN_DIRS')) ?? ''
-  for (const dir of dirs.split(':')) if (dir.trim() !== '') roots.push(`${dir.trim().replace(/\/$/, '')}/skills`)
+  for (const dir of folderList($, (await $.env.get('CLAUDE_CODE_PLUGIN_DIRS')) ?? '')) roots.push(`${dir}/skills`)
   const there: string[] = []
   for (const root of new Set(roots)) {
     if (await $.fs.exists(root).catch(() => false)) there.push(root)

@@ -7,77 +7,33 @@ import {
   RUN_DIR,
   SHARED,
   UNSHARED,
-  USAGE_MARK,
 } from './config'
-import { loginOf, ownConfig, skillRoots } from './codex-home'
+import { loginOf, ownConfig, sandboxChoice, skillRoots } from './codex-home'
+import { hostCommand, hostRun } from './host'
 import { trace } from './log'
 import type { Conn, Rpc } from './types'
+import { linkSessions } from './usage-links'
 
-// Runs `codex app-server` and speaks its newline-delimited JSON-RPC.
-//
-// A spawned child's stdin can be written only once, so the server's stdin is
-// a named pipe (mode 600, in a folder of mode 700) that it holds open itself;
-// each message is one `cat` into the pipe. A watcher process stops the server
-// when the process that started it is gone. It holds the pipe open until the
-// server has ended and the pipe is removed, so that a write after the server's
-// end does not wait for a reader. A pid file beside the pipe, written first,
-// names the server's process (`ALIVE`).
-const SERVE = `echo $$ > "\${0%.fifo}.pid" && mkfifo -m 600 "$0" && exec 3<>"$0" || exit 1
-(
-  while kill -0 "$PPID" 2>/dev/null && kill -0 "$$" 2>/dev/null; do sleep 2; done
-  kill "$$" 2>/dev/null
-  rm -f "$0" "\${0%.fifo}.pid"
-) </dev/null >/dev/null 2>&1 &
-exec "$1" app-server --disable memories --disable chronicle --disable plugins --disable apps -c "skills.bundled.enabled=false" -c "notify=[]" <&3`
-// Writes stdin to the pipe once it exists, and never to anything but a pipe.
-const SEND =
-  'i=0; while [ ! -p "$0" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; [ -p "$0" ] && cat > "$0"'
-/**
- * A shell function: whether a pipe's server is running. $1: the pipe's path
- * without `.fifo`; the pid file there names a process that runs app-server.
- */
-export const ALIVE = `alive() { ps -p "$(cat "$1.pid" 2>/dev/null)" -o command= 2>/dev/null | grep -q app-server; }`
+// Runs `codex app-server` and speaks its newline-delimited JSON-RPC, through
+// the host operations of host.ts: the server's stdin is a pipe the mod writes
+// each message to (`send`).
 
-// Prepares the mod's Codex home. $0: the mod's Codex home, $1: the person's,
-// $2: the pipe folder, $3: the new config file; the rest: entries to link, and
-// (prefixed `-`) old links to remove. Removes the pipes and pid files of
-// servers no longer running, then moves the new config into place.
-const LINK = `${ALIVE}
-mkdir -p "$0" "$2" && chmod 700 "$2"
-for left in "$2"/*.fifo "$2"/*.pid; do
-  [ -e "$left" ] || continue
-  alive "\${left%.*}" || rm -f "\${left%.*}.fifo" "\${left%.*}.pid"
-done
-home="$0" && own="$1" && new="$3" && shift 3
-for name in "$@"; do
-  case "$name" in
-    -*) [ -L "$home/\${name#-}" ] && rm -f "$home/\${name#-}" ;;
-    *) [ -e "$own/$name" ] && [ ! -e "$home/$name" ] && ln -s "$own/$name" "$home/$name" ;;
-  esac
-done
-[ -f "$new" ] && mv -f "$new" "$home/config.toml"
-exit 0`
-
-// After a server stops: removes its pipe and pid file, drops links whose file
-// is gone, and links each session file that has no link yet into the person's
-// Codex home at the same path (`USAGE_MARK`). Codex compresses older session
-// files (`.jsonl.zst`), so every file is looked at, in one pass. $0: the pipe,
-// $1: the mod's Codex home, $2: the person's, $3: the mark.
-const LEAVE = `rm -f "$0" "\${0%.fifo}.pid"
-find -L "$2/sessions" -type l -name "rollout-*$3.jsonl*" -exec rm -f {} + 2>/dev/null
-cd "$1" || exit 0
-{
-  (cd "$2" 2>/dev/null && find sessions -type l -name "rollout-*$3.jsonl*" 2>/dev/null)
-  echo /
-  find sessions -type f -name 'rollout-*.jsonl*' 2>/dev/null
-} | awk -v mark="$3" '
-  $0 == "/" { files = 1; next }
-  !files { linked[$0] = 1; next }
-  { link = $0; sub(/\\.jsonl/, mark ".jsonl", link); if (!(link in linked)) print $0 "\\t" link }
-' | while IFS="$(printf '\\t')" read -r file link; do
-  mkdir -p "$2/\${link%/*}" && ln -s "$1/$file" "$2/$link"
-done
-exit 0`
+/** What the server is started with, after the Codex binary. */
+const SERVER_ARGS = [
+  'app-server',
+  '--disable',
+  'memories',
+  '--disable',
+  'chronicle',
+  '--disable',
+  'plugins',
+  '--disable',
+  'apps',
+  '-c',
+  'skills.bundled.enabled=false',
+  '-c',
+  'notify=[]',
+]
 
 let version: string | undefined
 
@@ -94,11 +50,7 @@ async function versionOf($: EngineInterface): Promise<string> {
 
 /** Writes one message to the server, after any write still in flight. */
 export async function send($: EngineInterface, conn: Conn, message: Rpc): Promise<void> {
-  const sent = conn.sending.then(() =>
-    $.process.run(['/bin/sh', '-c', SEND, conn.fifo], {
-      stdin: `${JSON.stringify(message)}\n`,
-    }),
-  )
+  const sent = conn.sending.then(() => hostRun($, 'send', [conn.fifo], { stdin: `${JSON.stringify(message)}\n` }))
   conn.sending = sent.then(
     () => undefined,
     () => undefined,
@@ -166,7 +118,7 @@ export async function openConn(
     if (conn.isUp || conn.isStopped || tries === 3) return conn
     trace($, `app-server gave no answer (try ${tries}); starting it again`)
     await closeConn($, conn, false)
-    await $.process.run(['/bin/sleep', String(tries)]).catch(() => undefined)
+    await hostRun($, 'sleep', [String(tries)]).catch(() => undefined)
   }
 }
 
@@ -181,23 +133,22 @@ async function openOnce(
   const fifo = `${home}/${RUN_DIR}/${name}.fifo`
   const config = await $.fs.read(`${home}/${OWN_CODEX_HOME}/config.toml`).catch(() => '')
   const written = `${home}/${CODEX_HOME}/config.toml.${name}`
-  await $.process.run(['/bin/mkdir', '-p', `${home}/${CODEX_HOME}`]).catch(() => undefined)
   await $.fs.write(written, ownConfig(config)).catch(() => undefined)
-  await $.process
-    .run([
-      '/bin/sh',
-      '-c',
-      LINK,
-      `${home}/${CODEX_HOME}`,
-      `${home}/${OWN_CODEX_HOME}`,
-      `${home}/${RUN_DIR}`,
-      written,
-      ...SHARED,
-      ...UNSHARED.map(name => `-${name}`),
-    ])
-    .catch(() => undefined)
+  const serve = hostCommand($, 'serve', [
+    fifo,
+    `${home}/${CODEX_HOME}`,
+    `${home}/${OWN_CODEX_HOME}`,
+    written,
+    ...SHARED,
+    ...UNSHARED.map(name => `-${name}`),
+    '--',
+    bin,
+    ...SERVER_ARGS,
+    ...sandboxChoice($, config),
+  ])
   const child = $.process.spawn({
-    argv: ['/bin/sh', '-c', SERVE, fifo, bin],
+    argv: serve.argv,
+    ...(serve.stdin === undefined ? {} : { input: serve.stdin }),
     env: { CODEX_HOME: `${home}/${CODEX_HOME}` },
   })
   // The child starts at its first pull; that pull goes to the first reader.
@@ -254,12 +205,12 @@ async function openOnce(
     conn.hasEnded = true
     conn.isUp = false
     // A stopped agent's `$` calls all fail; a server that ended by itself leaves them working, and is retried.
-    conn.isStopped = isAbort(error) && !(await $.process.run(['/usr/bin/true']).then(() => true, () => false))
+    conn.isStopped = isAbort(error) && !(await hostRun($, 'noop').then(() => true, () => false))
   }
   return conn
 }
 
-/** Stops the server (interrupting a turn in flight) and links its new session files. */
+/** Stops the server (interrupting a turn in flight), removes its pipe and links its new session files. */
 export async function closeConn(
   $: EngineInterface,
   conn: Conn,
@@ -274,15 +225,6 @@ export async function closeConn(
   }
   conn.hasEnded = true
   conn.kill()
-  await $.process
-    .run([
-      '/bin/sh',
-      '-c',
-      LEAVE,
-      conn.fifo,
-      `${conn.home}/${CODEX_HOME}`,
-      `${conn.home}/${OWN_CODEX_HOME}`,
-      USAGE_MARK,
-    ])
-    .catch(() => undefined)
+  await hostRun($, 'leave', [conn.fifo]).catch(() => undefined)
+  await linkSessions($, conn.home)
 }

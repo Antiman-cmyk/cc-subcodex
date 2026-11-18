@@ -22,6 +22,7 @@ describe("Claude's skill folders", () => {
   }
   const there = new Set(['/h/.claude/skills', '/p/a/skills', '/p/b/skills', '/p/c/skills', '/p/d/skills', '/p/e/skills', '/p/f/skills', '/dev/x/skills'])
   const $ = {
+    plugin: { root: '/m' },
     fs: {
       read: async (path: string) => {
         const text = files[path]

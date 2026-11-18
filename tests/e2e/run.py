@@ -20,6 +20,7 @@ import concurrent.futures
 import glob
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -27,8 +28,27 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from tests.e2e import cases  # noqa: E402,F401  (registers the cases)
-from tests.e2e.harness import CASES, LIVE, RUN, Case  # noqa: E402
+if os.name == 'nt' and not sys.flags.utf8_mode and __name__ == '__main__':
+    # Files and pipes are read and written as UTF-8 (Python's UTF-8 mode).
+    sys.exit(subprocess.call([sys.executable, '-X', 'utf8', *sys.argv]))
+
+from tests.e2e import cases, host  # noqa: E402,F401  (registers the cases)
+from tests.e2e.harness import CASES, LIVE, RUN, SESSIONS, Case  # noqa: E402
+
+
+def remove(root: str) -> None:
+    """Removes a run folder; on Windows its read-only files (git's objects) too."""
+    if not host.WINDOWS:
+        shutil.rmtree(root, ignore_errors=True)
+        return
+
+    def writable(func, path, _) -> None:
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+        except OSError:
+            pass
+    shutil.rmtree(root, onexc=writable)
 
 
 def main() -> int:
@@ -61,27 +81,27 @@ def main() -> int:
                 print(f'       {"ok" if ok else "NO"}  {what}', flush=True)
         return c
 
+    run_started = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         done = list(pool.map(one, names))
     # After every session has ended: no process of the run is left, and no pipe.
-    def left() -> list[str]:
-        # A process of the run names a case's home on its command line (the mod's servers name their pipe there).
-        listed = subprocess.run(['pgrep', '-fl', f'{os.path.realpath(root)}/[^ ]*\\.home/'], capture_output=True, text=True).stdout.split('\n')
-        return [line for line in listed if line.strip()]
+    left = lambda: host.leftovers(SESSIONS, run_started, root)
 
-    for _ in range(10):  # a server told to stop takes a moment to go
-        if not left():
+    found = lambda: glob.glob(f'{root}/*.home/.claude/subcodex/run/*.fifo') + glob.glob(f'{root}/*.home/.claude/subcodex/run/*.pid')
+    for _ in range(10):  # a server told to stop takes a moment to go, and its pipe and pid file with it
+        if not left() and not found():
             break
         time.sleep(2)
-    pipes = glob.glob(f'{root}/*.home/.claude/subcodex/run/*.fifo') + glob.glob(f'{root}/*.home/.claude/subcodex/run/*.pid')
+    pipes = [os.path.relpath(path, root) for path in found()]
     after = Case('after_every_case', root)
-    after.check(not pipes, f"no pipe or pid file of a Codex server is left behind ({len(pipes)} found)")
+    after.check(not pipes, f"no pipe or pid file of a Codex server is left behind ({len(pipes)} found{': ' + ', '.join(pipes[:3]) if pipes else ''})")
     after.check(not left(), f'no process of the run is still running ({left()[:2]})')
     print(f'{"ok  " if all(ok for ok, _ in after.checks) else "FAIL"} after_every_case', flush=True)
     for ok, what in after.checks:
         if not ok or args.keep:
             print(f'       {"ok" if ok else "NO"}  {what}', flush=True)
     done.append(after)
+    host.remove_caches(root)
     failed = [c.name for c in done if not c.skipped and not (c.checks and all(ok for ok, _ in c.checks))]
     skipped = [c.name for c in done if c.skipped]
     checks = sum(len(c.checks) for c in done)
@@ -89,7 +109,7 @@ def main() -> int:
     if failed:
         print('failed:', ', '.join(failed))
     if not args.keep and not failed:
-        shutil.rmtree(root, ignore_errors=True)
+        remove(root)
     else:
         print('run folder kept:', root)
     return 1 if failed else 0

@@ -2,10 +2,10 @@
 import json
 import random
 
-from ..harness import Case, case, claude, codex_task, only_synthetic_at_no_cost, until_running
-from ..mocks import agent_id, answer, call, latest, outputs, results, run, say, use
+from ..harness import COMMAND_ROW, Case, case, claude, codex_task, only_synthetic_at_no_cost, until_running
+from ..mocks import LINES, agent_id, answer, call, latest, outputs, results, run, say, use
 
-SEND = [[use('message_parent', message='halfway there')], [run('wc -l notes.txt')], answer('notes.txt has 3 lines.')]
+SEND = [[use('message_parent', message='halfway there')], [run(LINES)], answer('notes.txt has 3 lines.')]
 
 
 def _heard(body: dict) -> dict:
@@ -31,7 +31,7 @@ def message_default(c: Case):
     c.check(not [r for r in s.rows if str(r.get('by', '')).startswith('claude-')], 'no Claude request was made inside the agent')
     c.check('Message: halfway there' in s.result, 'the main session received the message')
     only_synthetic_at_no_cost(c, s)
-    c.check(any('wc -l' in str(call['input'].get('command')) for call in s.calls('Bash')), 'Codex went on working after sending it')
+    c.check(any(LINES in str(call['input'].get('command')) for call in s.calls(COMMAND_ROW)), 'Codex went on working after sending it')
 
 
 @case
@@ -70,7 +70,7 @@ def steer_auto(c: Case):
             lambda body: say(f'Its report: {latest(body)}')]
     s = claude(c, main, codex, mode='auto')
     c.check(s.traced('passed on to Codex'), 'the message reached Codex while it was at work, in the turn it was in')
-    echoes = [str(call['input'].get('command')) for call in s.calls('Bash') if 'echo' in str(call['input'].get('command'))]
+    echoes = [str(call['input'].get('command')) for call in s.calls(COMMAND_ROW) if 'echo' in str(call['input'].get('command'))]
     c.check(any('BANANA' in e for e in echoes) and not any('APPLE' in e for e in echoes), f'Codex acted on it: it echoed BANANA, not APPLE ({echoes})')
     c.check(not s.traced('Codex turn 2'), 'the message did not also start a second Codex turn that does the task again')
     c.check('BANANA' in s.report(), "Codex's own report says BANANA")

@@ -23,6 +23,8 @@ describe('which changes are edit rows', () => {
   test('an update in place with hunks, or a new file, at an absolute path', () => {
     expect(isEditable({ path: '/w/a.py', kind: { type: 'update', move_path: null }, diff: DIFF })).toBe(true)
     expect(isEditable({ path: '/w/a.py', kind: { type: 'add' }, diff: 'x' })).toBe(true)
+    expect(isEditable({ path: 'C:\\w\\a.py', kind: { type: 'add' }, diff: 'x' })).toBe(true)
+    expect(isEditable({ path: '\\\\host\\share\\a.py', kind: { type: 'update', move_path: null }, diff: DIFF })).toBe(true)
   })
 
   test('not a move, a delete, a relative path, or an update without hunks', () => {

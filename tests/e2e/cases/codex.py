@@ -8,8 +8,8 @@ import subprocess
 import sys
 import zlib
 
-from ..harness import CODEX, MOD, Case, case, claude, codex_task, codex_threads, only_synthetic_at_no_cost
-from ..mocks import answer, note, patch, run, search, use
+from ..harness import COMMAND_ROW, CODEX, MOD, Case, case, claude, codex_task, codex_threads, only_synthetic_at_no_cost, usage_links
+from ..mocks import LINES, answer, note, patch, run, search, use
 
 FIX = ('*** Begin Patch\n*** Update File: cart.py\n@@\n def total(prices, coupon):\n'
        '-    prices = [p * (1 - coupon) for p in prices]\n     return sum(prices) * (1 - coupon)\n*** End Patch\n')
@@ -33,7 +33,7 @@ def fix_auto(c: Case):
     agents = {r['headers'].get('user-agent', '') for r in s.mocks.asked('openai')}
     c.check(agents and all(agent.endswith(f'(subcodex; {version})') for agent in agents),
             f"Codex was told the mod's version from plugin.json ({sorted(agents)[:1]})")
-    link = [p for t in threads for p in glob.glob(f'{c.home}/.codex/sessions/*/*/*/*{t["id"]}.subcodex.jsonl')]
+    link = [p for t in threads for p in usage_links(c) if p.endswith(f'{t["id"]}.subcodex.jsonl')]
     c.check(link and all(os.path.islink(p) for p in link), "the session file is linked into the person's Codex home for usage tools")
     only_synthetic_at_no_cost(c, s)
 
@@ -96,14 +96,14 @@ def outputs_default(c: Case):
               [use('spawn_agent', namespace='collaboration', message='Run wc -l notes.txt.', task_name='counter', fork_turns='none')],
               [use('wait_agent', namespace='collaboration', timeout_ms=30000)],
               answer('red, 3')]
-    sub = [[run('wc -l notes.txt')], answer('notes.txt has 3 lines.')]
+    sub = [[run(LINES)], answer('notes.txt has 3 lines.')]
     s = claude(c, [codex_task('Look at red.png, wait, count the lines of notes.txt with a sub-agent.')],
                {'Look at red.png': parent, 'Run wc -l notes.txt.': sub})
     said = s.said()
     c.check('[Codex looked at the image' in said and 'red.png' in said, 'looking at an image is a line')
     c.check('[Codex waited' in said, 'waiting is a line')
     c.check('[Codex started sub-agent' in said, "a sub-agent's start is a line")
-    c.check(any('sub-agent' in str(call['input'].get('description')) and '3' in call['text'] for call in s.calls('Bash')), "the sub-agent's command is a row marked as its, with its output")
+    c.check(any('sub-agent' in str(call['input'].get('description')) and '3' in call['text'] for call in s.calls(COMMAND_ROW)), "the sub-agent's command is a row marked as its, with its output")
     c.check(s.report() == 'red, 3', f"the result is the final answer alone, not what Codex said along the way, nor the mod's lines ({s.report()!r})")
 
 

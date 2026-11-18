@@ -44,7 +44,7 @@ export type Run = {
   pull: () => Promise<Ev>
   /** Events a `tool.call` hook read past while it waited for its command. */
   buffered: Ev[]
-  /** tool_use_id of a mirrored Bash call -> the Codex item it mirrors. */
+  /** tool_use_id of a mirrored command row -> the Codex item it mirrors. */
   tools: Map<string, string>
   /** tool_use_id of a mirrored Edit or Write call -> the edit it shows. */
   edits: Map<string, Extract<Ev, { t: 'edit' }>>
@@ -185,4 +185,6 @@ export type Codex = {
   models: string[]
   /** Whether their Codex config says when Codex asks before it acts. */
   hasApprovalPolicy: boolean
+  /** Whether the program the mod runs its own work in could not start (`HOST_MISSING`). */
+  isHostMissing: boolean
 }

@@ -6,7 +6,7 @@ A Claude Code mod that adds OpenAI Codex as a native subagent type, `subcodex:co
 
 - Claude Code 2.1.32x (the Mod API is in early access).
 - The Codex CLI, installed and logged in with a ChatGPT account (developed against codex-cli 0.165.0; uses experimental app-server APIs). An API key saved with `codex login --with-api-key` is not used. To use an API key, define a model provider in `~/.codex/config.toml` that reads the key from an environment variable (`env_key`), and set that variable for Claude Code.
-- macOS or Linux.
+- macOS, Linux or Windows. On Windows: PowerShell 7 (`pwsh`) installed and on the PATH, in which the mod's own work there runs; Developer Mode on (Settings > System > For developers): the mod makes symbolic links.
 
 ## Installation
 
@@ -50,7 +50,7 @@ The main agent dispatches the agent with the Agent tool, `subagent_type: "subcod
 
 The agent's loop is run by Claude Code, so the task list, background runs, transcripts and notifications behave as for any subagent. While Codex works, the mod answers each step of the agent from Codex's event stream instead of sending a Claude request:
 
-- Codex's text becomes text rows; its commands become Bash rows carrying Codex's real output (nothing is run again), with the latest lines of output shown under the row while a command runs; its edits of files in place and its new files become native Edit and Write rows with the diff (the tools are not run); a delete, a move or a failed edit is a row with the diff.
+- Codex's text becomes text rows; its commands become Bash rows (on Windows PowerShell rows, where the session has the PowerShell tool) carrying Codex's real output (nothing is run again), with the latest lines of output shown under the row while a command runs; its edits of files in place and its new files become native Edit and Write rows with the diff (the tools are not run); a delete, a move or a failed edit is a row with the diff.
 - Codex's other actions each get a line: web searches and their results, its own MCP tools, plans, viewing or generating images, waiting, review mode, context compaction, its reviewer's decisions, warnings, and usage limits nearly used up.
 - Codex's own sub-agents show in the same transcript, their text prefixed with `[Codex sub-agent <name>]`. Codex manages them; they end when the Codex agent is stopped.
 - When a Codex turn ends, the message Codex marks as its final answer is the agent's result.
@@ -71,7 +71,7 @@ There are **no Claude model calls inside a Codex agent**, including auto-mode me
 
 ## Permissions
 
-- **Sandbox**: as configured for Codex (`sandbox_mode`, network access).
+- **Sandbox**: as configured for Codex (`sandbox_mode`, network access). On Windows, where the Codex config sets neither `features.prefer_mxc` nor `windows.sandbox`, Codex prefers its MXC sandbox (`features.prefer_mxc=true`, with `suppress_unstable_features_warning=true`); on a device without MXC, Codex chooses its sandbox as it does by itself.
 - **When Codex asks**: per `approval_policy` in the Codex config; if unset, when it needs more than the sandbox allows.
 - **Who approves**: Codex's own automatic reviewer (`auto_review`, "Approve for me" in the Codex app). When it refuses, Codex takes a safer route or ends its turn asking for approval; once the caller explicitly approves, Codex goes on. Each decision is a line in the transcript.
 - **Plan mode**: the sandbox is read-only, and every request for more is refused.
@@ -89,10 +89,10 @@ There are **no Claude model calls inside a Codex agent**, including auto-mode me
 
 - **Session data**: kept in `~/.claude/subcodex/codex-home/`, apart from `~/.codex`. Full sessions are kept there so that follow-ups resume the same thread; they do not appear in the session lists or archives of Codex or the ChatGPT desktop app.
 - **Agent records**: one small file per agent in `~/.claude/subcodex/agents/`, naming the Codex thread it goes on in, its model and effort, and messages Codex has not yet taken in. A later message resumes from it after a reload or in a resumed session. `/subcodex clean` removes the records whose session is gone.
-- **Usage**: rows the mod writes into transcripts are stamped `<synthetic>` with zero usage and are not counted as Claude usage; Codex usage counts against your Codex account. When a server stops, its session files are symlinked into `~/.codex/sessions/<year>/<month>/<day>/` (named with `.subcodex`), where usage tools such as codeburn count them.
+- **Usage**: rows the mod writes into transcripts are stamped `<synthetic>` with zero usage and are not counted as Claude usage; Codex usage counts against your Codex account. As each Codex turn starts, and when a server stops, the session files that have no link yet are symlinked into `~/.codex/sessions/<year>/<month>/<day>/` (named with `.subcodex`), where usage tools such as codeburn count them. Only the mod's day folders changed since the last such pass are looked at (`~/.claude/subcodex/usage-links.json` holds when it began); there, links of the mod's that lead to no file are removed, and `/subcodex clean` removes them everywhere and has the next pass look at every day folder.
 - **Configuration used**: default model and effort, sandbox and network access, approval policy, feature flags, personality, `rules`, `hooks.json`. `~/.codex/config.toml` is copied at each start, without the parts that add context.
 - **Not used**: the global `AGENTS.md`, Codex's own skills and plugins, MCP servers from the config, memories, sub-agent roles and global instructions; memories and chronicle are disabled and the notify program is not run. A project's own `AGENTS.md` and project skills still apply.
-- **Login**: the access token in `~/.codex/auth.json` is read at each server start and passed to the server in memory, through a pipe only you can read (`~/.claude/subcodex/run/`). If the token has expired, open Codex once.
+- **Login**: the access token in `~/.codex/auth.json` is read at each server start and passed to the server in memory, through a pipe only you can read (`~/.claude/subcodex/run/`; on Windows a named pipe, `\\.\pipe\subcodex-<name>`, that only you can open). If the token has expired, open Codex once.
 - **Context**: Codex manages and compacts its own context. When the context Claude Code keeps for the agent fills, the mod compacts it without a model (keeping the task and the latest rows), and the transcript shows "Conversation compacted"; the saved transcript is unaffected. Command output in transcript rows keeps the first 2,000 and last 6,000 characters.
 
 ## `/subcodex`
@@ -100,7 +100,7 @@ There are **no Claude model calls inside a Codex agent**, including auto-mode me
 | Command | Effect |
 |---|---|
 | `/subcodex` | Shows the Codex binary and version, default model and effort, login, the usage limits last reported, and what is kept: session files, links, records, and Codex's own databases |
-| `/subcodex clean <days>` | Removes session files older than the given number of days, with their links and records; Codex's own databases stay (Codex prunes its logs itself) |
+| `/subcodex clean <days>` | Removes session files older than the given number of days, with their links and records; Codex's own databases stay (Codex prunes its logs itself). Links the other session files are missing are made as the next Codex agent starts |
 | `/subcodex clean all` | Removes every link and all of `~/.claude/subcodex/`; use before uninstalling |
 
 Sessions are never removed automatically. Cleaning touches only the mod's own files, and `clean all` does nothing while a Codex agent is running. If the mod was uninstalled without cleaning:
@@ -108,6 +108,13 @@ Sessions are never removed automatically. Cleaning touches only the mod's own fi
 ```bash
 find ~/.codex/sessions -type l -name '*.subcodex.jsonl*' -delete
 rm -rf ~/.claude/subcodex
+```
+
+On Windows, in PowerShell 7 (`Directory.Delete` removes the links in the folder without following them):
+
+```powershell
+Get-ChildItem "$HOME\.codex\sessions" -Recurse -Filter '*.subcodex.jsonl*' -Attributes ReparsePoint | Remove-Item
+[IO.Directory]::Delete("$HOME\.claude\subcodex", $true)
 ```
 
 ## Differences from native subagents
@@ -129,7 +136,7 @@ rm -rf ~/.claude/subcodex
 - The tasks Codex passes to its own sub-agents are encrypted; the transcript shows only each sub-agent's name and what it did.
 - Usage links rely on usage tools reading `rollout-*.jsonl` under `sessions/<year>/<month>/<day>/`, and on Codex skipping symbolic links when it lists sessions.
 - Codex still reads `~/.agents/skills`.
-- Tested on macOS only.
+- Tested on macOS and on Windows 11.
 
 ## Development
 
@@ -138,20 +145,24 @@ rm -rf ~/.claude/subcodex
 | `hooks/register.ts` | Hook entry point |
 | `hooks/steps.ts` | Writes Codex's events as steps of the agent |
 | `hooks/turn.ts` | A Codex turn: open or resume the thread, a turn or a review, read events, answer server requests |
-| `hooks/app-server.ts` | Start app-server, send and receive, log in, stop, usage links |
+| `hooks/app-server.ts` | Start app-server, send and receive, log in, stop |
+| `hooks/usage-links.ts` | Usage links: the session files linked into `~/.codex` |
 | `hooks/events.ts` | Maps app-server notifications to events |
 | `hooks/agents.ts` | Agent state, settings and persistence |
 | `hooks/model-mock.ts` | Intercepts model requests and supplies local mock responses |
 | `hooks/usage.ts` | Codex usage-limit formatting |
 | `hooks/compact.ts` | Context compaction without a model |
 | `hooks/bridge.ts` | The tools given to Codex |
-| `hooks/codex-home.ts` | Finding Codex, login, the config copy, skill folders, Claude's instruction files |
+| `hooks/codex-home.ts` | Finding Codex, login, the config copy and the sandbox options on Windows, skill folders, Claude's instruction files |
 | `hooks/upkeep.ts` | The `/subcodex` command |
 | `hooks/edits.ts` | Codex's edits as Edit and Write rows |
 | `hooks/live.tsx` | Running commands' output under their rows |
 | `hooks/config.ts` | Shared names, paths and limits |
 | `hooks/types.ts` | Shared types |
 | `hooks/log.ts` | Debug log lines (`claude --debug`) |
+| `hooks/host.ts` | The host system: which one, and each host operation's command on it |
+| `hooks/posix.ts` | The host operations on macOS and Linux: `/bin/sh` scripts and commands |
+| `hooks/windows.ts` | The host operations on Windows: PowerShell 7 scripts |
 | `types/index.d.ts` | The values the mod keeps in the session's state |
 
 The mod registers two tools, both written only by the mod as rows of an agent's transcript: `mcp__subcodex__checkpoint` (separates local protocol steps) and `mcp__subcodex__claude_tool` (Codex using a session tool, sending a message or submitting a workflow result).
@@ -178,7 +189,7 @@ python3 tests/e2e/run.py leave      # cases whose name contains the word
 python3 tests/e2e/run.py --keep     # every check shown, run folder kept
 ```
 
-The tests need `claude` and `codex` on `PATH`, and a shell that may reach local ports.
+The tests need `claude` and `codex` on `PATH`, and a shell that may reach local ports. On Windows, run them with `python` in place of `python3`, with PowerShell 7 and Developer Mode as for the mod; Codex's commands in the cases are written for PowerShell there. A case's home there is also its `USERPROFILE`; its `LOCALAPPDATA` is yours, and the cache Claude Code writes in it for each case folder (`claude-cli-nodejs\Cache`) is removed when the run ends. Codex takes the home folder from Windows itself: it may read your `~/.agents/skills`, and its MXC sandbox setup keeps empty marker files (`.codex-provisioning-*.guard`) in your `~/.codex`.
 
 Live cases (`cases/live.py`) run only when asked for. They run real Codex, on your own ChatGPT login, against your Codex usage limits; the main session stays scripted, so they use no Claude usage. Each case links your `~/.codex/auth.json` into its home (the file alone, never copied), runs `gpt-6-luna` at low effort, and prints the tokens Codex used. They check outcomes, since the model is not scripted: a fix on disk, a deferred session tool found and called, a decision of Codex's reviewer. Without a ChatGPT login they are skipped. Their Codex sessions stay in the run folder, so codeburn does not count them.
 
@@ -190,6 +201,7 @@ python3 tests/e2e/run.py --live     # the live cases only
 |---|---|
 | `mocks.py` | The scripted model APIs, and helpers that write Codex's and the main session's steps |
 | `harness.py` | A case's folder and home, a session run against the mocks, and what is read back from it |
+| `host.py` | The host system: the processes running, waiting for one, and stopping a session, on Windows or elsewhere |
 | `cases/engine.py` | Verbatim results, local hand-backs, follow-ups, Codex's own sub-agents, long runs, workflows, background agents |
 | `cases/codex.py` | A fix, a review, action lines, context given to Codex, web search |
 | `cases/leave.py` | Requests outside the sandbox: Codex's reviewer, refusal in plan mode |

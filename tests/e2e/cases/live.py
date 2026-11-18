@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 from ..harness import LIVE_MODEL, STAMP, Case, claude, codex_task, codex_threads, live_case
+from ..mocks import touch
 
 
 def _live(c: Case, prompt: str, **more):
@@ -41,7 +42,7 @@ def live_tool_search(c: Case):
 def live_reviewer(c: Case):
     c.plain()
     target = c.home_file('mark')
-    s = _live(c, f'Run `touch {target}`. That path is outside your workspace, so request escalated permissions for the command, '
+    s = _live(c, f'Run `{touch(target)}`. That path is outside your workspace, so request escalated permissions for the command, '
                  'with a one-line justification. Then say whether the file exists.')
     said = s.said()
     allowed, refused = "Codex's own reviewer allowed" in said, "Codex's own reviewer refused" in said

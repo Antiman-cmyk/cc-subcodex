@@ -10,10 +10,25 @@ import re
 import threading
 import time
 
-from ..harness import CODEX, Case, case, claude, codex_task, codex_threads, only_synthetic_at_no_cost, running, until_running, watch
+from .. import host
+from ..harness import (COMMAND_ROW, CODEX, Case, case, claude, codex_task, codex_threads, only_synthetic_at_no_cost, running, until_running,
+                       usage_links, watch)
 from ..mocks import agent_id, answer, call, latest, results, run, say, use
 
 FORGET = 'Forget the sleep. Reply with just the codeword from your task.'
+
+
+def _kill(seconds: float, command: str) -> dict:
+    """When a session is killed outright: so many seconds in, or on Windows once Codex has run `command` for 2 seconds."""
+    if not host.WINDOWS:
+        return {'kill_after': seconds}
+    since = {}
+
+    def is_due() -> bool:
+        if 'at' not in since and running(command):
+            since['at'] = time.time()
+        return 'at' in since and time.time() - since['at'] >= 2
+    return {'kill_when': is_due}
 
 
 def _recall(word: str):
@@ -74,7 +89,7 @@ def stop_auto(c: Case):
     time.sleep(3)
     c.check(not running(f'sleep {seconds}'), "after the stop, Codex's command is gone")
     # Either the mod's interrupt or the engine's stop ends the server.
-    c.check(re.search(r'Codex interrupted|/bin/sh stopped: the op was aborted', s.log), "Codex's server was stopped with the agent")
+    c.check(re.search(r'Codex interrupted|(/bin/sh|pwsh\.exe) stopped: the op was aborted', s.log), "Codex's server was stopped with the agent")
 
 
 @case
@@ -83,11 +98,13 @@ def killed_session(c: Case):
     seconds = 5000 + random.randrange(1000)
     seen, stop = {'seen': False}, threading.Event()
     threading.Thread(target=watch, args=(f'sleep {seconds}', seen, stop), daemon=True).start()
-    claude(c, [codex_task(f'Run sleep {seconds} and then say done.')], [[run(f'sleep {seconds}')], answer('done')], kill_after=15)
+    claude(c, [codex_task(f'Run sleep {seconds} and then say done.')], [[run(f'sleep {seconds}')], answer('done')], **_kill(15, f'sleep {seconds}'))
     stop.set()
     c.check(seen['seen'], 'Codex really started the long command')
     time.sleep(8)
     c.check(not running(f'sleep {seconds}'), "the session's process killed outright: Codex's command does not live on")
+    links = usage_links(c)
+    c.check(links and all(os.path.exists(link) for link in links), f"the agent's Codex session was linked for usage tools as its turn began ({len(links)})")
 
 
 @case
@@ -98,7 +115,7 @@ def worktree_default(c: Case):
     c.check(not os.path.exists(f'{c.folder}/made-in-worktree.txt'), 'the main checkout is untouched')
     made = glob.glob(f'{c.folder}/.claude/worktrees/*/made-in-worktree.txt')
     c.check(made, "Codex worked in the agent's own worktree: the file is there")
-    c.check(any('/worktrees/' in call['text'] for call in s.calls('Bash') if 'pwd' in str(call['input'].get('command'))), "Codex's own `pwd` says so")
+    c.check(any(re.search(r'[\\/]worktrees[\\/]', call['text']) for call in s.calls(COMMAND_ROW) if 'pwd' in str(call['input'].get('command'))), "Codex's own `pwd` says so")
 
 
 @case
@@ -110,7 +127,7 @@ def parallel_default(c: Case):
     codex = {a: [[run(f'echo {a}')], answer(f'It printed {a}.')], b: [[run(f'echo {b}')], answer(f'It printed {b}.')]}
     s = claude(c, main, codex)
     c.check(len(s.agents) == 2, f'two Codex agents ran ({len(s.agents)} found)')
-    outputs = [' '.join(call['text'] for call in s.calls('Bash', rows)) for rows in s.agents]
+    outputs = [' '.join(call['text'] for call in s.calls(COMMAND_ROW, rows)) for rows in s.agents]
     c.check(sorted((a in o, b in o) for o in outputs) == [(False, True), (True, False)], "each agent's rows hold its own command's output and not the other's")
     c.check(a in s.result and b in s.result, 'both results reached the main session')
     c.check(len({t['id'] for t in codex_threads(c) if t['source'] == 'vscode'}) == 2, 'each ran on a Codex thread of its own')
@@ -161,8 +178,12 @@ def killed_then_continue(c: Case):
     seconds = 7000 + random.randrange(1000)
     main = [codex_task(f'Remember the codeword {word}. Then run sleep {seconds} and then say done.', background=True),
             call('Bash', command='sleep 120', timeout=150000)]
-    first = claude(c, main, [[run(f'sleep {seconds}')]], mode='auto', kill_after=20)
+    seen, stop = {'seen': False}, threading.Event()
+    threading.Thread(target=watch, args=(f'sleep {seconds}', seen, stop), daemon=True).start()
+    first = claude(c, main, [[run(f'sleep {seconds}')]], mode='auto', **_kill(20, f'sleep {seconds}'))
+    stop.set()
     c.check(first.id, 'the first session started')
+    c.check(seen['seen'], 'Codex really started the long command before the session was killed')
     time.sleep(5)
     c.check(not running(f'sleep {seconds}'), "killed outright mid-turn: Codex's command does not live on")
     second = claude(c, _ask_again(FORGET), [_recall(word)], mode='auto', resume=first.id)

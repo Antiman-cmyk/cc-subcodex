@@ -61,6 +61,7 @@ describe('messages Codex has not taken in', () => {
 /** A session that lists no agents, with the given files under the home directory `/h`. */
 const filesOf = (files: Record<string, string>) =>
   ({
+    plugin: { root: '/m' },
     agent: { list: async () => [] },
     env: { get: async (name: string) => (name === 'HOME' ? '/h' : undefined) },
     process: { run: async () => ({ stdout: '', stderr: '', code: 0 }) },

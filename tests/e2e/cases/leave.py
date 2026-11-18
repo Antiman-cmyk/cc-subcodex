@@ -3,7 +3,7 @@ import os
 import re
 
 from ..harness import Case, case, claude, codex_task
-from ..mocks import answer, run
+from ..mocks import answer, run, touch
 
 WHY = 'The task asks to create this file outside the workspace.'
 
@@ -13,7 +13,7 @@ def plan_readonly(c: Case):
     c.plain()
     target = c.home_file('plan')
     s = claude(c, [codex_task('Find out what your sandbox lets you do.')],
-               [[run('touch made-by-codex.txt')], [run(f'touch {target}', escalate=WHY)], answer('Neither was allowed.')], mode='plan')
+               [[run(touch('made-by-codex.txt'))], [run(touch(target), escalate=WHY)], answer('Neither was allowed.')], mode='plan')
     c.check(not os.path.exists(f'{c.folder}/made-by-codex.txt'), 'plan mode: nothing was written in the workspace')
     c.check(not os.path.exists(target), 'plan mode: nothing was written outside it either')
     c.check(re.search(r'sandbox "?readOnly', s.log), "Codex's sandbox was read-only")
@@ -25,7 +25,7 @@ def _leave(c: Case, mode: str, reviewer: str = 'allow'):
     c.plain()
     target = c.home_file('mark')
     s = claude(c, [codex_task('Create the mark file outside the workspace.')],
-               [[run(f'touch {target}', escalate=WHY)], answer('Done.')], mode=mode, reviewer=reviewer)
+               [[run(touch(target), escalate=WHY)], answer('Done.')], mode=mode, reviewer=reviewer)
     c.check(re.search(r'approvals \S+/auto_review,', s.log), "the thread's requests for leave go to Codex's own reviewer")
     return s, target
 
