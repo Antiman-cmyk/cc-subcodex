@@ -4,8 +4,8 @@ A Claude Code mod that adds OpenAI Codex as a native subagent type, `subcodex:co
 
 ## Requirements
 
-- Claude Code 2.1.32x (the Mod API is in early access).
-- The Codex CLI, installed and logged in with a ChatGPT account (developed against codex-cli 0.165.0; uses experimental app-server APIs). An API key saved with `codex login --with-api-key` is not used. To use an API key, define a model provider in `~/.codex/config.toml` that reads the key from an environment variable (`env_key`), and set that variable for Claude Code.
+- Claude Code, tested with the version in `.github/versions.json` (the Mod API is in early access).
+- The Codex CLI, tested with the version in `.github/versions.json`, installed and logged in with a ChatGPT account (it uses experimental app-server APIs). An API key saved with `codex login --with-api-key` is not used. To use an API key, define a model provider in `~/.codex/config.toml` that reads the key from an environment variable (`env_key`), and set that variable for Claude Code.
 - macOS, Linux or Windows. On Windows: PowerShell 7 (`pwsh`) installed and on the PATH, in which the mod's own work there runs; Developer Mode on (Settings > System > For developers): the mod makes symbolic links. Where it cannot make them, `/subcodex` and the agent's transcript say so, and the session makes no more usage links.
 
 ## Installation
@@ -61,7 +61,7 @@ In auto mode, the mod uses a local Messages API response for each `SendMessage`,
 
 The response includes a **simulated classifier acknowledgement** for that exact tool call. No Claude safety review takes place. This prevents the engine from attaching a classifier-unavailable warning to the report or Desktop notification. The report remains Codex's closing message, word for word, without generated hand-off notes. Records are marked `<synthetic>` with zero usage.
 
-The mechanism is scoped to this mod's own agents and pending protocol calls. Unexpected requests are refused rather than sent to a Claude model. It depends on the early-access engine protocol (verified with Claude Code 2.1.325); organization guards that restrict `http.fetch` can make it unavailable.
+The mechanism is scoped to this mod's own agents and pending protocol calls. Unexpected requests are refused rather than sent to a Claude model. It depends on the early-access engine protocol, which CI tests with the Claude Code version in `.github/versions.json`; organization guards that restrict `http.fetch` can make it unavailable.
 
 ### Workflow schemas
 
@@ -167,10 +167,10 @@ Get-ChildItem "$HOME\.codex\sessions" -Recurse -Filter '*.subcodex.jsonl*' -Attr
 
 The mod registers two tools, both written only by the mod as rows of an agent's transcript: `mcp__subcodex__checkpoint` (separates local protocol steps) and `mcp__subcodex__claude_tool` (Codex using a session tool, sending a message or submitting a workflow result).
 
-Validate:
+Validate, which also type-checks the code and tests against the Mod API types of the `claude` on `PATH` (`--strict` fails on any warning):
 
 ```bash
-claude plugin validate .
+claude plugin validate --strict .
 ```
 
 ### Tests
@@ -210,3 +210,7 @@ python3 tests/e2e/run.py --live     # the live cases only
 | `cases/bridge.py` | Codex calling session tools (the test tools of the `tests/e2e/fixture/` plugin): a result, a picture, a deny rule, plan mode |
 | `cases/upkeep.py` | `/subcodex` and its cleaning, pipes of servers no longer running, usage links and links that cannot be made, agent records |
 | `cases/live.py` | Real Codex, with `--live` only: a fix, tool search for a session tool, Codex's reviewer |
+
+### Following new releases
+
+- `.github/versions.json` holds the Claude Code and Codex versions the code is tested against. `.github/actions/install` installs them with each CLI's own installer (`claude.ai/install.sh` or `install.ps1`, and `chatgpt.com/codex/install.sh` or `install.ps1`). The `CI` workflow runs, with them, strict validation (which type-checks the mod against the Mod API types of the installed Claude Code), the unit tests and the offline end-to-end tests on macOS and Windows, for each push to `main` and each pull request.

@@ -1,0 +1,49 @@
+name: Install Claude Code and Codex
+description: Installs the versions in .github/versions.json with each CLI's own installer and puts them on PATH.
+
+outputs:
+  claude:
+    description: The path of the installed claude
+    value: ${{ steps.check.outputs.claude }}
+
+runs:
+  using: composite
+  steps:
+    - id: versions
+      shell: bash
+      run: |
+        echo "claude=$(node -p "require('./.github/versions.json')['@anthropic-ai/claude-code']")" >> "$GITHUB_OUTPUT"
+        echo "codex=$(node -p "require('./.github/versions.json')['@openai/codex']")" >> "$GITHUB_OUTPUT"
+    - if: runner.os != 'Windows'
+      shell: bash
+      env:
+        CLAUDE_VERSION: ${{ steps.versions.outputs.claude }}
+        CODEX_VERSION: ${{ steps.versions.outputs.codex }}
+      run: |
+        curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_VERSION"
+        curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh -s -- --release "$CODEX_VERSION"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+    - if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        CLAUDE_VERSION: ${{ steps.versions.outputs.claude }}
+        CODEX_RELEASE: ${{ steps.versions.outputs.codex }}
+        CODEX_NON_INTERACTIVE: '1'
+      run: |
+        & ([scriptblock]::Create((irm https://claude.ai/install.ps1))) $env:CLAUDE_VERSION
+        irm https://chatgpt.com/codex/install.ps1 | iex
+        Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.local\bin"
+        Add-Content -Path $env:GITHUB_PATH -Value "$env:LOCALAPPDATA\Programs\OpenAI\Codex\bin"
+    - id: check
+      shell: bash
+      env:
+        CLAUDE_VERSION: ${{ steps.versions.outputs.claude }}
+        CODEX_VERSION: ${{ steps.versions.outputs.codex }}
+      run: |
+        claude --version | grep -F "$CLAUDE_VERSION"
+        codex --version | grep -F "$CODEX_VERSION"
+        if [ "$RUNNER_OS" = Windows ]; then
+          echo "claude=$(cygpath -w "$(command -v claude.exe)")" >> "$GITHUB_OUTPUT"
+        else
+          echo "claude=$(command -v claude)" >> "$GITHUB_OUTPUT"
+        fi

@@ -1,5 +1,6 @@
 {
   "name": "cc-subcodex",
+  "description": "The subcodex plugin, which runs OpenAI Codex as a native Claude Code subagent type.",
   "owner": {
     "name": "Antiman-cmyk"
   },

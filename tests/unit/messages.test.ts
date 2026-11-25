@@ -3,6 +3,9 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { agentOf, merged, newAgent, recordPath, remember, saidTo, untaken } from '../../hooks/agents'
 
+// The test runner's own timer, which the Mod API types do not declare.
+declare const setTimeout: (callback: (...args: unknown[]) => void, ms: number) => unknown
+
 // What an agent has been told, and which of it is new since its last reply.
 
 const agentWith = (turns: number) => ({
