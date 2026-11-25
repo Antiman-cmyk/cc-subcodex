@@ -29,4 +29,14 @@ jobs:
       - uses: ./.github/actions/install
       - run: claude plugin validate --strict .
       - run: claude plugin test .
-      - run: python tests/e2e/run.py
+      - id: e2e
+        run: |
+          python tests/e2e/run.py && exit 0
+          python -c "import glob, os, tempfile; print('kept=' + max(glob.glob(os.path.join(tempfile.gettempdir(), 'subcodex-tests-*')), key=os.path.getmtime))" >> "$GITHUB_OUTPUT"
+          exit 1
+      - if: failure() && steps.e2e.outputs.kept
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ runner.os }}
+          path: ${{ steps.e2e.outputs.kept }}
+          include-hidden-files: true
