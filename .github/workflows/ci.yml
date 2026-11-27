@@ -29,14 +29,19 @@ jobs:
       - uses: ./.github/actions/install
       - run: claude plugin validate --strict .
       - run: claude plugin test .
-      - id: e2e
+      - name: Codex's own Windows sandbox for the cases (no MXC here)
+        if: runner.os == 'Windows'
         run: |
-          python tests/e2e/run.py && exit 0
-          python -c "import glob, os, tempfile; print('kept=' + max(glob.glob(os.path.join(tempfile.gettempdir(), 'subcodex-tests-*')), key=os.path.getmtime))" >> "$GITHUB_OUTPUT"
-          exit 1
-      - if: failure() && steps.e2e.outputs.kept
+          home="$(cygpath -u "$RUNNER_TEMP")/codex-sandbox" && mkdir -p "$home"
+          CODEX_HOME="$(cygpath -w "$home")" codex sandbox setup --elevated --current-user
+          echo "SUBCODEX_TESTS_CODEX_SANDBOX=$(cygpath -w "$home")" >> "$GITHUB_ENV"
+      - id: e2e
+        run: python tests/e2e/run.py --out "$RUNNER_TEMP/e2e"
+      - if: failure() && steps.e2e.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
           name: e2e-${{ runner.os }}
-          path: ${{ steps.e2e.outputs.kept }}
+          path: |
+            ${{ runner.temp }}/e2e
+            !${{ runner.temp }}/e2e/**/.sandbox-bin/**
           include-hidden-files: true

@@ -27,6 +27,10 @@ CODEX = 'gpt-6.1-terra'  # the Codex model the cases name; its requests go to th
 # Live cases: real Codex on the person's own ChatGPT login, on a small model.
 LIVE_MODEL = 'gpt-6-luna'
 PERSON_CODEX = os.environ.get('CODEX_HOME') or os.path.expanduser('~/.codex')
+# A Codex home where `codex sandbox setup --elevated` has run: each case's Codex home links its sandbox setup and
+# chooses that sandbox (Windows without MXC; CI sets it).
+SANDBOX_HOME = os.environ.get('SUBCODEX_TESTS_CODEX_SANDBOX')
+SANDBOX_SETUP = ('.sandbox', '.sandbox-bin', '.sandbox-secrets')
 LIVE_HOSTS = ('chatgpt.com', 'openai.com')
 TOKENS = ('input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')
 RUN = f'{random.randrange(16**6):06x}'
@@ -149,9 +153,14 @@ def claude(c: 'Case', main: list, codex=None, mode: str = 'default', extra: tupl
     os.makedirs(c.folder, exist_ok=True)
     os.makedirs(f'{c.home}/.codex', exist_ok=True)
     os.makedirs(f'{c.home}/.claude', exist_ok=True)
+    for name in SANDBOX_SETUP if SANDBOX_HOME else ():
+        if os.path.isdir(os.path.join(SANDBOX_HOME, name)) and not os.path.lexists(f'{c.home}/.codex/{name}'):
+            os.symlink(os.path.join(SANDBOX_HOME, name), f'{c.home}/.codex/{name}', target_is_directory=True)
     with Mocks(main, codex, reviewer) as mocks:
         # Only the workspace is writable: the case's home, under the temporary folder, is not.
         sandbox = '[sandbox_workspace_write]\nexclude_tmpdir_env_var = true\nexclude_slash_tmp = true\n\n'
+        if SANDBOX_HOME:
+            sandbox += '[windows]\nsandbox = "elevated"\n\n'
         if live:
             # The login file alone, linked: never copied, and nothing else of the person's Codex.
             if not os.path.islink(f'{c.home}/.codex/auth.json'):
