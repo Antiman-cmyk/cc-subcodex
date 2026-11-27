@@ -24,8 +24,8 @@ export const CODEX_HOME = `${DATA_DIR}/codex-home`
 export const AGENTS_DIR = `${DATA_DIR}/agents`
 /** Pipes to running app-servers (mode 700). */
 export const RUN_DIR = `${DATA_DIR}/run`
-/** Entries of the person's Codex home linked into the mod's. */
-export const SHARED = ['rules', 'hooks.json', 'packages', 'models_cache.json']
+/** Entries of the person's Codex home linked into the mod's; the `.sandbox` ones hold Codex's Windows sandbox setup. */
+export const SHARED = ['rules', 'hooks.json', 'packages', 'models_cache.json', '.sandbox', '.sandbox-bin', '.sandbox-secrets']
 /** Links that older versions made in the mod's Codex home; removed at start. */
 export const UNSHARED = ['config.toml', 'AGENTS.md', 'AGENTS.override.md', 'plugins', 'agents']
 /** Config tables and top-level keys left out of the mod's copy of the person's Codex config. */
