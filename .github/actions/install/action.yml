@@ -1,5 +1,5 @@
 name: Install Claude Code and Codex
-description: Installs the versions in .github/versions.json with each CLI's own installer and puts them on PATH.
+description: Installs the versions in .github/versions.json with each CLI's own installer and puts them on PATH; on Windows, sets up Codex's own sandbox for the tests.
 
 outputs:
   claude:
@@ -47,3 +47,10 @@ runs:
         else
           echo "claude=$(command -v claude)" >> "$GITHUB_OUTPUT"
         fi
+    - name: Codex's own Windows sandbox for the tests (no MXC on the runner)
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        home="$(cygpath -u "$RUNNER_TEMP")/codex-sandbox" && mkdir -p "$home"
+        CODEX_HOME="$(cygpath -w "$home")" codex sandbox setup --elevated --current-user
+        echo "SUBCODEX_TESTS_CODEX_SANDBOX=$(cygpath -w "$home")" >> "$GITHUB_ENV"

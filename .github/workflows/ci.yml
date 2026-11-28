@@ -29,12 +29,6 @@ jobs:
       - uses: ./.github/actions/install
       - run: claude plugin validate --strict .
       - run: claude plugin test .
-      - name: Codex's own Windows sandbox for the cases (no MXC here)
-        if: runner.os == 'Windows'
-        run: |
-          home="$(cygpath -u "$RUNNER_TEMP")/codex-sandbox" && mkdir -p "$home"
-          CODEX_HOME="$(cygpath -w "$home")" codex sandbox setup --elevated --current-user
-          echo "SUBCODEX_TESTS_CODEX_SANDBOX=$(cygpath -w "$home")" >> "$GITHUB_ENV"
       - id: e2e
         run: python tests/e2e/run.py --out "$RUNNER_TEMP/e2e"
       - if: failure() && steps.e2e.outcome == 'failure'
