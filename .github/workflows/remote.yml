@@ -1,0 +1,41 @@
+name: Remote
+run-name: Remote ${{ inputs.os }} ${{ inputs.channel }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        type: choice
+        options: [macos-latest, windows-latest]
+        required: true
+      channel:
+        description: The channel's name (branches remote/<channel>/in and remote/<channel>/out)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  serve:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 120
+    env:
+      DISABLE_AUTOUPDATER: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: ./.github/actions/install
+      - name: On Windows, a temporary folder without 8.3 names
+        if: runner.os == 'Windows'
+        run: echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV" && echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - run: bash .github/remote.sh serve "$CHANNEL"
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          RELAY_TOKEN: ${{ github.token }}
