@@ -71,7 +71,9 @@ describe('the host commands', () => {
     expect(hostCommand(POSIX_SESSION, 'version', ['/bin/codex'])).toEqual({ argv: ['/bin/codex', '--version'] })
     expect(hostCommand(POSIX_SESSION, 'find', ['/bin/zsh'])).toEqual({ argv: ['/bin/zsh', '-lc', 'command -v codex'] })
     expect(hostCommand(POSIX_SESSION, 'remove', ['/a', '/b'])).toEqual({ argv: ['/bin/rm', '-f', '/a', '/b'] })
-    expect(hostCommand(POSIX_SESSION, 'leave', ['/h/run/x.fifo'])).toEqual({ argv: ['/bin/rm', '-f', '/h/run/x.fifo', '/h/run/x.pid'] })
+    const leave = hostCommand(POSIX_SESSION, 'leave', ['/h/run/x.fifo']).argv
+    expect([leave[0], leave[1], leave.at(-1)]).toEqual(['/bin/sh', '-c', '/h/run/x.fifo'])
+    expect(leave[2]).toContain('exec 4<>"$1"')
     // The links to make and remove go on stdin, a line each.
     const links = hostCommand(POSIX_SESSION, 'links', ['/o/a.subcodex.jsonl', '/m/a.jsonl', '/o/b.subcodex.jsonl', ''])
     expect(links.argv.slice(0, 2)).toEqual(['/bin/sh', '-c'])

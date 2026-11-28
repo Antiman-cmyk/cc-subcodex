@@ -97,6 +97,8 @@ def upkeep_default(c: Case):
     # Left over: a pipe whose server is gone; in the day folder the agent's session goes in (Codex's local date), a
     # link of the mod's whose session file is gone and a link of the person's own.
     stale = _pipe(c, 'stale', _ended())
+    # A writer waiting in `open` for its reader, on the pipe of a server that ended before it opened it.
+    waiting = None if host.WINDOWS else subprocess.Popen(['/bin/sh', '-c', 'echo late > "$0"', f'{stale}.fifo'])
     today = _today()
     gone_today = _gone(c, today)
     theirs = f'{c.home}/.codex/sessions/{today}/rollout-{today.replace("/", "-")}T00-00-00-theirs.jsonl'
@@ -109,6 +111,15 @@ def upkeep_default(c: Case):
     c.check(os.path.islink(f'{c.home}/.claude/subcodex/codex-home/packages'), "the person's `packages` folder is linked into the mod's Codex home")
     c.check(not os.path.exists(f'{stale}.fifo') and not os.path.exists(f'{stale}.pid'),
             "a server's start removed the pipe and pid file of a server no longer running")
+    if waiting is not None:
+        try:
+            waiting.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            waiting.kill()
+            waiting.wait()
+            c.check(False, 'a writer waiting for the reader of a pipe removed as stale was let through')
+        else:
+            c.check(True, 'a writer waiting for the reader of a pipe removed as stale was let through')
     c.check(not os.path.lexists(gone_today), "in the day folder of the agent's session, the mod's link whose session file is gone was removed")
     c.check(os.path.lexists(theirs), "a link of the person's own was left alone")
     links = usage_links(c)

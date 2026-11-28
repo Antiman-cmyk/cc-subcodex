@@ -19,6 +19,18 @@ import type { Host } from './host'
 const ALIVE = `alive() { ps -p "$(cat "$1.pid" 2>/dev/null)" -o command= 2>/dev/null | grep -q app-server; }`
 
 /**
+ * A shell function: removes a pipe and its pid file. $1: the pipe. A writer
+ * waiting in `open` for a reader that never comes (a server stopped before it
+ * opened its pipe) is let through first: the pipe is held open for reading and
+ * writing, which never waits, while it is removed; the writer then writes into
+ * the pipe and ends, or fails once the pipe is closed.
+ */
+const RELEASE = `release() {
+  [ -p "$1" ] && ( exec 4<>"$1" && rm -f "$1" && sleep 0.2 ) 2>/dev/null
+  rm -f "$1" "\${1%.fifo}.pid"
+}`
+
+/**
  * Prepares the mod's Codex home, then runs the server. $0: the pipe; $1: the
  * mod's Codex home, $2: the person's, $3: the new config file; then entries to
  * link, and (prefixed `-`) old links to remove, up to `--`; the rest: Codex
@@ -26,11 +38,12 @@ const ALIVE = `alive() { ps -p "$(cat "$1.pid" 2>/dev/null)" -o command= 2>/dev/
  * running, and moves the new config into place, before the server starts.
  */
 const SERVE = `${ALIVE}
+${RELEASE}
 run="\${0%/*}" && home="$1" && own="$2" && new="$3" && shift 3
 mkdir -p "$home" "$run" && chmod 700 "$run"
 for left in "$run"/*.fifo "$run"/*.pid; do
   [ -e "$left" ] || continue
-  alive "\${left%.*}" || rm -f "\${left%.*}.fifo" "\${left%.*}.pid"
+  alive "\${left%.*}" || release "\${left%.*}.fifo"
 done
 while [ $# -gt 0 ]; do
   name="$1" && shift
@@ -120,6 +133,10 @@ case "$0" in */${DATA_DIR}) ;; *) exit 1 ;; esac
 find "$1/sessions" "$1/archived_sessions" -type l -name "rollout-*$2.jsonl*" 2>/dev/null | unlink_each
 rm -rf "$0"`
 
+/** Removes a stopped server's pipe and pid file. $0: the pipe. */
+const LEAVE = `${RELEASE}
+release "$0"`
+
 /** A script run by `/bin/sh`, its arguments `$0` onward. */
 const sh = (script: string) => (args: readonly string[]) => ({ argv: ['/bin/sh', '-c', script, ...args] })
 
@@ -127,7 +144,7 @@ export const POSIX: Host = {
   serve: sh(SERVE),
   send: sh(SEND),
   // A stopped server's pipe and pid file.
-  leave: ([fifo = '']) => ({ argv: ['/bin/rm', '-f', fifo, fifo.replace(/\.fifo$/, '.pid')] }),
+  leave: sh(LEAVE),
   links: pairs => ({ argv: ['/bin/sh', '-c', LINKS], stdin: `${pairs.join('\n')}\n` }),
   look: sh(LOOK),
   prune: sh(PRUNE),
